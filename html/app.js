@@ -25,7 +25,7 @@
               items: [], sel: -1, open: false, chip: { place: 'all', lib: 'lighting', shells: 'all', spots: 'all' }, q: {}, shellTimer: null, shown: false, pv: null,
               src: 'decorate', lib: null, bad: new Set(), more: 0, pieces: [], thumbs: {},
               shellSrc: 'shells', ipls: null, iplStyle: {}, styling: null };
-  const iplLabel = (exp) => { const e = (S.ipls || []).find((x) => x.export === exp); return e ? e.label : exp; };
+  const iplLabel = (exp) => { if (/^at:/.test(exp || '')) return 'a place in the world (' + exp.slice(3) + ')'; const e = (S.ipls || []).find((x) => x.export === exp); return e ? e.label : exp; };
   const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};   // an empty Lua table arrives as []
   const styleOf = (exp) => S.iplStyle[exp] || (S.iplStyle[exp] = { preset: 'default', choice: {}, on: {} });
   const PRESET = { default: 'As the game has it', full: 'Full, everything on', empty: 'Empty', custom: 'Pick each part' };
@@ -251,7 +251,11 @@
   function renderHead() {
     const t = S.tab;
     banner.hidden = !((S.pick || S.styling) && (t === 'rooms' || t === 'shells'));
-    if (!banner.hidden && S.pick) banner.innerHTML = `<span>Making <b>${esc(S.pick.label)}</b>: pick a shell or an interior, go inside, then <kbd>G</kbd> at the way out.</span><button class="btn" data-a="pickCancel">Cancel</button>`;
+    if (!banner.hidden && S.pick) banner.innerHTML = `<span>Making <b>${esc(S.pick.label)}</b>. Choose where it leads:</span>
+      <button class="btn${S.shellSrc === 'shells' ? ' pri' : ''}" data-a="useShell"><i class="fa-solid fa-cube"></i>&nbsp;Use a shell</button>
+      <button class="btn${S.shellSrc === 'ipls' ? ' pri' : ''}" data-a="useIpl"><i class="fa-solid fa-building"></i>&nbsp;Use a game interior</button>
+      <button class="btn" data-a="usePlace"><i class="fa-solid fa-person-walking"></i>&nbsp;Use a place I go to</button>
+      <button class="btn" data-a="pickCancel">Cancel</button>`;
     else if (!banner.hidden) banner.innerHTML = `<span>Styling <b>${esc(S.styling.label)}</b>: pick a style, then Save style to the room.</span><button class="btn" data-a="stylingCancel">Cancel</button>`;
     let h = '';
     if (t === 'rooms') h = `<span class="grow">${S.rooms.length} rooms. A room is a door, a shell and saved looks of furniture.</span><button class="btn pri" data-a="newRoom">New room at my spot <kbd>N</kbd></button>`;
@@ -467,6 +471,9 @@
         post('roomDelete', { name: it.name }).then((r) => { if (result(r, 'Removed')) load(); }); return;
       }
       case 'edit': case 'showPieces': setSrc('pieces'); return;
+      case 'useShell': S.shellSrc = 'shells'; setTab('shells'); return;
+      case 'useIpl': S.shellSrc = 'ipls'; post('previewStop'); S.pv = null; setTab('shells'); return;
+      case 'usePlace': post('placeWalk').then((r) => result(r)); return;
       case 'iplGo': if (it && it.ipl) post('iplVisit', { export: it.export, style: styleOf(it.export) }); return;
       case 'iplPreset': {
         if (!it || !it.ipl) return;

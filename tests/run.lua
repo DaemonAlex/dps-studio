@@ -120,6 +120,10 @@ check('ipl room: a new empty look starts on the default style', il3.style.preset
 check('ipl room: clean passes with the interior in the list', Studio.CleanRoom(Studio.Copy(iroom), {}, nil, { GetBikerClubhouse1Object = true }) ~= nil)
 check('ipl room: clean refuses an unknown interior', Studio.CleanRoom(Studio.Copy(iroom), {}, nil, {}) == nil)
 check('shell room: public data says shell', Studio.PublicRoom(room).kind == 'shell')
+check('place key: made from a spot, rounded', Studio.PlaceKey({ x = -1011.6, y = -478.2, z = 50.4 }) == 'at:-1012,-478,50')
+check('place key: accepted shape only', Studio.IsPlaceKey('at:-1012,-478,50') and not Studio.IsPlaceKey('at:1,2') and not Studio.IsPlaceKey('GetX'))
+local proom = Studio.NewIplRoom('movie', 'Movie Office', 'at:-1012,-478,50', { x = 1, y = 2, z = 3, h = 0 }, { x = -1011.6, y = -478.2, z = 50.4, h = 0 }, nil)
+check('place room: clean passes without being in the interior list', Studio.CleanRoom(Studio.Copy(proom), {}, nil, {}) ~= nil)
 
 -- old files
 local s = Studio.ParseSpotLine('210 | 2026-09-30 07:21:11 | Schtoop | greenroom | vec3(690.36, 588.38, 131.06) | heading 343.8 | no prop within 6m | Marlowe Dr | Vinewood Hills')

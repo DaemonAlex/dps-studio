@@ -457,6 +457,48 @@ StudioC.Unlight = unlight
 
 RegisterNUICallback('ipls', function(_, cb) cb(StudioC.IplCatalogue()) end)
 
+-- "Use a place I go to": the panel closes, the admin gets to any interior or map by any means,
+-- stands where people should arrive and presses G. The room is then that place in the world.
+local placeWalking = false
+RegisterNUICallback('placeWalk', function(_, cb)
+    if not pick then return cb({ ok = false, err = 'Start a new room first' }) end
+    if pv.on then previewStop() end
+    cb({ ok = true })
+    hide()
+    placeWalking = true
+    nui({ action = 'keys', title = 'Go to the place for ' .. pick.label, keys = {
+        { 'Walk, drive or /tp', 'get there' }, { 'G', 'the way out is here' }, { 'Backspace', 'stop' } } })
+    CreateThread(function()
+        local calm = GetGameTimer() + 300
+        while placeWalking do
+            DisableControlAction(0, 47, true); DisableControlAction(0, 194, true); DisableControlAction(0, 177, true)
+            if GetGameTimer() < calm then
+                -- wait out the click that started this
+            elseif IsDisabledControlJustPressed(0, 47) and pick and not cache.vehicle then
+                local ped = cache.ped
+                local p = GetEntityCoords(ped)
+                local d = { kind = 'ipl', ipl = Studio.PlaceKey(p), style = { preset = 'default' },
+                            name = pick.name, label = pick.label, entrance = pick.entrance, redo = pick.redo == true,
+                            exit = { x = p.x, y = p.y, z = p.z, h = GetEntityHeading(ped) } }
+                local ok, err = lib.callback.await('dps-studio:roomCreate', false, d)
+                if ok then
+                    placeWalking = false
+                    pick = nil
+                    nui({ action = 'keys' })
+                    notify(true, ('%s is ready. Its door is where you started; press E there to try it.'):format(d.label))
+                else
+                    notify(false, err or 'Not saved')
+                end
+            elseif IsDisabledControlJustPressed(0, 194) or IsDisabledControlJustPressed(0, 177) then
+                placeWalking = false
+                nui({ action = 'keys' })
+                show('rooms')
+            end
+            Wait(0)
+        end
+    end)
+end)
+
 RegisterNUICallback('iplVisit', function(d, cb)
     if type(d.export) ~= 'string' then return cb({ ok = false }) end
     if pv.on then previewStop() end

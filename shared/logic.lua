@@ -165,6 +165,16 @@ local function copyPieces(list)
     return out
 end
 
+---An interior room either names a bob74 interior, or is simply a place in the world:
+---'at:x,y,z' (rounded to whole metres), for any interior or map the admin walked to.
+function Studio.IsPlaceKey(s)
+    return type(s) == 'string' and #s <= 40 and s:match('^at:%-?%d+,%-?%d+,%-?%d+$') ~= nil
+end
+
+function Studio.PlaceKey(p)
+    return ('at:%d,%d,%d'):format(math.floor(p.x + 0.5), math.floor(p.y + 0.5), math.floor(p.z + 0.5))
+end
+
 ---A fresh interior (IPL) room: the way out is a spot inside the interior in world terms.
 function Studio.NewIplRoom(name, label, ipl, entrance, exit, style)
     local room = Studio.NewRoom(name, label, nil, entrance, exit)
@@ -264,7 +274,7 @@ end
 function Studio.CleanRoom(room, shellSet, models, iplSet)
     if type(room) ~= 'table' then return nil, 'Unreadable room', 0 end
     if room.kind == 'ipl' then
-        if type(room.ipl) ~= 'string' or not (iplSet or {})[room.ipl] then return nil, 'Its interior is not in the list', 0 end
+        if type(room.ipl) ~= 'string' or not ((iplSet or {})[room.ipl] or Studio.IsPlaceKey(room.ipl)) then return nil, 'Its interior is not in the list', 0 end
         if not Studio.ValidSpot(room.exit) then return nil, 'Bad way out', 0 end
     else
         room.kind = nil

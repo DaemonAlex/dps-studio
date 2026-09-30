@@ -39,7 +39,8 @@ code{font:12px var(--mono);color:var(--cd-ink)}
 .mode.on i{color:var(--cd-sun)}
 #banner{flex:0 0 auto;padding:9px 12px;background:rgba(255,122,69,.14);border-bottom:1px solid var(--cd-sun);font-size:13px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 #banner b{color:var(--cd-sun2)}
-#banner button{margin-left:auto}
+#banner button{margin-left:0}
+#banner button[data-a="pickCancel"]{margin-left:auto}
 #head{flex:0 0 auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 12px;border-bottom:1px solid var(--cd-border);background:rgba(17,21,34,.35);font-size:13px;color:var(--cd-dim)}
 #head:empty{display:none}
 #head b{color:var(--cd-ink);font-weight:500}

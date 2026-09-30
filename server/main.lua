@@ -285,14 +285,14 @@ lib.callback.register('dps-studio:roomCreate', function(src, d)
     if not label then return false, 'The door words must be 1 to 40 letters' end
     if d.kind == 'ipl' then
         -- an interior (IPL) room: the way out is a spot inside the interior, in world terms
-        if type(d.ipl) ~= 'string' or not iplSet[d.ipl] then return false, 'That interior is not in the list' end
+        if type(d.ipl) ~= 'string' or not (iplSet[d.ipl] or Studio.IsPlaceKey(d.ipl)) then return false, 'That interior is not in the list' end
         if not Studio.ValidSpot(d.entrance) then return false, 'Bad door spot' end
         if not Studio.ValidSpot(d.exit) then return false, 'Bad way out' end
         if rooms[name] and d.redo ~= true then return false, 'That name is taken. Pick another, or use Change shell or way out on that room.' end
         if not rooms[name] and d.redo == true then return false, 'That room is gone' end
         local owner = iplOwner(d.ipl, name)
         if owner then return false, ('That interior already belongs to %s. Each interior serves one room.'):format(owner.label) end
-        local iplLabel = d.ipl
+        local iplLabel = Studio.IsPlaceKey(d.ipl) and 'a place in the world' or d.ipl
         for _, e in ipairs(StudioIpls) do if e.export == d.ipl then iplLabel = e.label end end
         return change(src, name, rooms[name] and 'rebuild' or 'create', ('Made room %s in %s'):format(label, iplLabel), function()
             local old = rooms[name]
