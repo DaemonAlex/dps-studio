@@ -49,8 +49,24 @@ local function drawBox(e)
     end)
 end
 
+---Where the player stands, as the game sees it: a real interior (MLO) and its room, a
+---Studio room, or outdoors. An MLO where this says outdoors is a broken map (sun gets in).
+local function whereAmI()
+    local ped = cache.ped
+    local int = GetInteriorFromEntity(ped)
+    if int and int ~= 0 then
+        local room = GetRoomKeyFromEntity(ped)
+        return ('Inside an interior (%d, room %d)'):format(int, room or 0), true
+    end
+    local here = StudioC.RoomHere and StudioC.RoomHere()
+    if here then return 'Inside Studio room ' .. here, true end
+    return 'Outdoors to the game', false
+end
+StudioC.WhereAmI = whereAmI
+
 local function collect(e)
     local d = { name = nameOf(e) }
+    d.where, d.indoors = whereAmI()
     pcall(function()
         local t = GetEntityType(e)
         d.kind = t == 1 and 'Person' or t == 2 and 'Vehicle' or t == 3 and 'Object' or 'Unknown'
@@ -80,7 +96,7 @@ local function run()
                 end
             elseif last then
                 last = nil
-                SendNUIMessage({ action = 'inspect', card = { name = 'Nothing here', note = 'Map ground and buildings baked into the map cannot be read. Aim at a prop, car or person.' } })
+                SendNUIMessage({ action = 'inspect', card = { name = 'Nothing here', where = (whereAmI()), note = 'Map ground and buildings baked into the map cannot be read. Aim at a prop, car or person.' } })
             end
             Wait(0)
         end

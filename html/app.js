@@ -429,11 +429,16 @@
   /* move and resize, remembered per player */
   const geo = store('dps-studio-geo', { x: 24, y: null, w: 600, h: 66 });
   function applyGeo() {
-    const w = Math.max(420, Math.min(window.innerWidth - 20, geo.w)); geo.w = w;
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const w = Math.max(420, Math.min(vw - 20, geo.w)); geo.w = w;
     document.documentElement.style.setProperty('--w', w + 'px');
     document.documentElement.style.setProperty('--h', Math.max(30, Math.min(88, geo.h)) + 'vh');
-    app.style.left = Math.max(0, Math.min(window.innerWidth - 120, geo.x)) + 'px';
-    if (geo.y != null) app.style.top = Math.max(0, Math.min(window.innerHeight - 60, geo.y)) + 'px';
+    // the whole panel stays on screen: left edge, top edge and bottom edge
+    const x = Math.max(0, Math.min(vw - w, geo.x));
+    const top = geo.y == null ? Math.round(vh * 0.06) : Math.max(0, Math.min(vh - 260, geo.y));
+    app.style.left = x + 'px';
+    app.style.top = top + 'px';
+    document.documentElement.style.setProperty('--maxh', Math.max(200, vh - top - 50 - 8 - 12) + 'px');
   }
   function dragger(handle, onMove) {
     let sx = 0, sy = 0, active = false, base = null;
@@ -469,6 +474,7 @@
   function inspectCard(d) {
     const v4 = d.x != null ? `vector4(${f2(d.x)}, ${f2(d.y)}, ${f2(d.z)}, ${Number(d.h || 0).toFixed(1)})` : '';
     return `<h5>INSPECT</h5><div class="big">${esc(d.name)}</div><dl>
+      ${d.where ? `<dt>You</dt><dd>${esc(d.where)}</dd>` : ''}
       ${d.kind ? `<dt>Kind</dt><dd>${esc(d.kind)}</dd>` : ''}${d.hash ? `<dt>Hash</dt><dd>${esc(d.hash)}</dd>` : ''}${v4 ? `<dt>Spot</dt><dd>${esc(v4)}</dd>` : ''}</dl>
       ${d.note ? `<p>${esc(d.note)}</p>` : ''}<p>Open /admin, Inspect tab, to copy it.</p>`;
   }
@@ -499,7 +505,7 @@
         if (m.card) showCard(inspectCard(m.card));
         else if (m.linger) { clearTimeout(cardT); cardT = setTimeout(() => showCard(null), m.linger); }
         break;
-      case 'pos': showCard(`<h5>F3 COORDS · #${esc(m.id)}</h5><div class="big">${esc(m.text)}</div><p>Saved. Open /admin, Spots tab, to copy it.</p>`, 12000); break;
+      case 'pos': showCard(`<h5>F3 COORDS · #${esc(m.id)}</h5><div class="big">${esc(m.text)}</div>${m.where ? `<dl><dt>You</dt><dd>${esc(m.where)}</dd></dl>` : ''}<p>Saved. Open /admin, Spots tab, to copy it.</p>`, 12000); break;
       case 'changed':
         if (m.here !== undefined) S.here = m.here || null;
         if (S.shown && (!m.what || m.what === S.tab)) load();
