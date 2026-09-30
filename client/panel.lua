@@ -250,7 +250,30 @@ local function tpTo(x, y, z, h, roomName)
     CreateThread(function() StudioC.Move(vec3(x, y, z), h, roomName) end)
 end
 
+-- Checks every library model once per session and tells the page which ones this game cannot
+-- spawn, so the list never offers a dead entry. Runs in small steps so it never stutters.
+local libChecked = false
+local function checkLibrary()
+    if libChecked then return end
+    libChecked = true
+    CreateThread(function()
+        local ok, data = pcall(json.decode, LoadResourceFile(GetCurrentResourceName(), 'html/library.json') or '')
+        if not ok or type(data) ~= 'table' then return end
+        local bad, n = {}, 0
+        for _, g in ipairs(data.groups or {}) do
+            for _, it in ipairs(g.items or {}) do
+                n = n + 1
+                if not IsModelInCdimage(joaat(it[1])) then bad[#bad + 1] = it[1] end
+                if n % 600 == 0 then Wait(0) end
+            end
+        end
+        print(('[dps-studio] library: %d models, %d not in this game'):format(n, #bad))
+        nui({ action = 'libBad', names = bad })
+    end)
+end
+
 RegisterNUICallback('boot', function(_, cb)
+    checkLibrary()
     local b = boot or lib.callback.await('dps-studio:boot', false)
     if not b then return cb({ ok = false }) end
     local shells = type(b.shells) == 'table' and b.shells or {}

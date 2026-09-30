@@ -22,7 +22,14 @@
   const PH = { rooms: 'Search rooms…', place: 'Search furniture…', shells: 'Search shells: warehouse, office, garage…', inspect: 'Search scans…', spots: 'Search spots…', doors: '', history: 'Search history…' };
 
   const S = { tab: 'rooms', boot: null, rooms: [], spots: [], hist: [], scans: [], here: null, pick: null,
-              items: [], sel: -1, open: false, chip: { place: 'all', shells: 'all', spots: 'all' }, q: {}, shellTimer: null, shown: false, pv: null, closeModal: null };
+              items: [], sel: -1, open: false, chip: { place: 'all', lib: 'lighting', shells: 'all', spots: 'all' }, q: {}, shellTimer: null, shown: false, pv: null,
+              src: 'lib', lib: null, bad: new Set(), more: 0 };
+  const LIB_ICON = { lighting: 'fa-lightbulb', seating: 'fa-couch', tables: 'fa-table', beds: 'fa-bed', storage: 'fa-box-archive', kitchen: 'fa-kitchen-set',
+    bathroom: 'fa-bath', bar: 'fa-martini-glass', electronics: 'fa-tv', office: 'fa-briefcase', decor: 'fa-image', plants: 'fa-seedling', gym: 'fa-dumbbell',
+    crime: 'fa-screwdriver-wrench', street: 'fa-road-barrier', other: 'fa-cube', mappieces: 'fa-puzzle-piece' };
+  const PREFIX = /^(prop_|v_res_|v_ret_|v_ilev_|v_serv_|v_corp_|v_club_|v_med_|v_ind_|v_\d+_|apa_mp_h_|apa_prop_|ex_prop_|ex_mp_h_|bkr_prop_|imp_prop_|ba_prop_|xs_prop_|h4_prop_|ch_prop_|vw_prop_|sf_prop_|sf_mp_h_|tr_prop_|reh_prop_|sum_prop_|gr_prop_|hei_prop_|hei_heist_|sm_prop_|xm_prop_|xm3_prop_|m2\d_\d_prop_|p_)/;
+  const pretty = (m) => { const s = m.replace(PREFIX, '').replace(/_/g, ' ').trim(); return s ? s.charAt(0).toUpperCase() + s.slice(1) : m; };
+  const LIB_CAP = 300;
 
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const store = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } };
@@ -75,6 +82,7 @@
 
   /* ---------- data per tab ---------- */
   const words = (s) => String(s || '').toLowerCase();
+  const words_ = (s) => words(s).split(/\s+/).filter(Boolean);
   const match = (hay) => { const t = words(q.value).split(/\s+/).filter(Boolean); const h = words(hay); return t.every((w) => h.includes(w)); };
   const roomByName = (n) => S.rooms.find((r) => r.name === n);
 
@@ -88,6 +96,22 @@
       case 'rooms': return S.rooms.filter((r) => match(`${r.label} ${r.name} ${r.shell} ${r.lookName}`));
       case 'place': {
         const out = [];
+        S.more = 0;
+        if (S.src === 'lib') {
+          if (!S.lib) return out;
+          const words = words_(q.value);
+          const searching = words.length > 0;
+          for (const g of S.lib.groups) {
+            if (!searching && S.chip.lib !== 'all' && S.chip.lib !== g.key) continue;
+            for (const it of g.items) {
+              if (S.bad.has(it.m)) continue;
+              if (searching && !words.every((w) => it.hay.includes(w))) continue;
+              if (out.length >= LIB_CAP) { S.more++; continue; }
+              out.push({ object: it.m, label: it.label, cat: g.label, gkey: g.key, src: it.src, lib: true });
+            }
+          }
+          return out;
+        }
         if (!S.boot) return out;
         for (const c of S.boot.furniture) {
           if (S.chip.place !== 'all' && S.chip.place !== c.key) continue;
@@ -120,8 +144,8 @@
       nm = esc(it.label); mt = `<code>${esc(it.name)}</code> · ${esc(it.shell)} · look <b>${esc(it.lookName)}</b>`;
       rt = pieceMeter(it.count, it.max) + (S.here === it.name ? '<span class="badge on">You are here</span>' : '');
     } else if (tab === 'place') {
-      thumb = it.img ? `<img src="${esc(it.img)}" alt="" loading="lazy">` : '<i class="fa-solid fa-couch"></i>';
-      nm = esc(it.label); mt = `<code>${esc(it.object)}</code> · ${esc(it.cat)}`;
+      thumb = it.img ? `<img src="${esc(it.img)}" alt="" loading="lazy">` : `<i class="fa-solid ${it.lib ? (LIB_ICON[it.gkey] || 'fa-cube') : 'fa-couch'}"></i>`;
+      nm = esc(it.label); mt = `<code>${esc(it.object)}</code> · ${esc(it.cat)}${it.lib ? ' · ' + esc(it.src === 'Game' ? 'game' : it.src) : ''}`;
     } else if (tab === 'shells') {
       const m = it.meta;
       thumb = `<i class="fa-solid ${m && m.use === 'garage' ? 'fa-warehouse' : m && m.use === 'business' ? 'fa-briefcase' : 'fa-cube'}"></i>`;
@@ -196,7 +220,12 @@
     head.innerHTML = h;
 
     let c = '';
-    if (t === 'place' && S.boot && S.here) c = [['all', 'All']].concat(S.boot.furniture.map((f) => [f.key, f.label])).map(([k, l]) => `<button class="chip${S.chip.place === k ? ' on' : ''}" data-c="${esc(k)}">${esc(l)}</button>`).join('');
+    if (t === 'place' && S.here) {
+      const srcs = `<button class="chip src${S.src === 'lib' ? ' on' : ''}" data-s="lib"><i class="fa-solid fa-layer-group"></i> Full library${S.lib ? ' · ' + (S.lib.count - S.bad.size).toLocaleString('en-US') : ''}</button><button class="chip src${S.src === 'housing' ? ' on' : ''}" data-s="housing"><i class="fa-solid fa-image"></i> Housing furniture, with pictures</button><span class="brk"></span>`;
+      if (S.src === 'lib' && S.lib) c = srcs + [['all', 'All']].concat(S.lib.groups.map((g) => [g.key, g.label])).map(([k, l]) => `<button class="chip${S.chip.lib === k && !q.value.trim() ? ' on' : ''}" data-c="${esc(k)}">${esc(l)}</button>`).join('') + (q.value.trim() ? '<span class="brk"></span><span class="hint2">Searching every group</span>' : '');
+      else if (S.boot) c = srcs + [['all', 'All']].concat(S.boot.furniture.map((f) => [f.key, f.label])).map(([k, l]) => `<button class="chip${S.chip.place === k ? ' on' : ''}" data-c="${esc(k)}">${esc(l)}</button>`).join('');
+      else c = srcs;
+    }
     else if (t === 'shells' && S.boot) {
       const uses = Array.from(new Set(Object.values(S.boot.meta || {}).map((m) => m.use))).sort();
       c = [['all', 'All']].concat(uses.map((u) => [u, u])).map(([k, l]) => `<button class="chip${S.chip.shells === k ? ' on' : ''}" data-c="${esc(k)}">${esc(l)}</button>`).join('');
@@ -212,10 +241,11 @@
     q.disabled = t === 'doors'; q.placeholder = PH[t] || '';
     stage.hidden = !(t === 'shells' && S.shown);
     if (t === 'doors') { list.innerHTML = doorsDoc(); S.items = []; $('#cnt').textContent = ''; return; }
+    if (t === 'place' && S.here && S.src === 'lib' && !S.lib) { renderHead(); list.innerHTML = '<div class="empty"><b>Loading the library…</b></div>'; S.items = []; return; }
     if (t === 'place' && !S.here) { list.innerHTML = placeEmpty(); S.items = []; $('#cnt').textContent = ''; return; }
     S.items = itemsFor(t);
-    list.innerHTML = S.items.length ? S.items.map((it, i) => rowHtml(t, it, i)).join('') : `<div class="empty">${emptyMsg(t)}</div>`;
-    $('#cnt').textContent = S.items.length ? String(S.items.length) : '';
+    list.innerHTML = S.items.length ? S.items.map((it, i) => rowHtml(t, it, i)).join('') + (S.more ? `<div class="empty"><span>${S.more.toLocaleString('en-US')} more. Type a word to narrow it down, like lamp, neon or chandelier.</span></div>` : '') : `<div class="empty">${emptyMsg(t)}</div>`;
+    $('#cnt').textContent = S.items.length ? (S.more ? `${S.items.length}+${S.more}` : String(S.items.length)) : '';
     S.sel = -1;
     if (S.items.length) {
       let i = 0;
@@ -366,7 +396,10 @@
   document.addEventListener('click', (e) => {
     const b = e.target.closest('[data-a]'); if (b && !modal.contains(b)) { e.stopPropagation(); act(b.dataset.a, b); return; }
     const tbtn = e.target.closest('.mode'); if (tbtn) { setTab(tbtn.dataset.t); return; }
-    const c = e.target.closest('.chip'); if (c && chips.contains(c)) { S.chip[S.tab] = c.dataset.c; render(false); return; }
+    const c = e.target.closest('.chip'); if (c && chips.contains(c)) {
+      if (c.dataset.s) { S.src = c.dataset.s; keep('dps-studio-src', S.src); render(false); return; }
+      S.chip[S.tab === 'place' && S.src === 'lib' ? 'lib' : S.tab] = c.dataset.c; render(false); return;
+    }
     const r = e.target.closest('.row'); if (r && list.contains(r) && !e.target.closest('.det')) { const i = +r.dataset.i; select(i, i === S.sel ? !S.open : true); }
   });
   list.addEventListener('dblclick', (e) => { const r = e.target.closest('.row'); if (r && !e.target.closest('.det')) primary(); });
@@ -374,7 +407,7 @@
   function closeModal() { if (!modal.hidden) { const n = modal.querySelector('#fno'); if (n) n.click(); else { modal.hidden = true; modal.innerHTML = ''; } } }
   $('#close').addEventListener('click', () => { closeModal(); post('close'); });
   $('#fleet').addEventListener('click', () => post('fleet'));
-  let qt; q.addEventListener('input', () => { clearTimeout(qt); qt = setTimeout(() => render(false), 90); });
+  let qt = null; q.addEventListener('input', () => { clearTimeout(qt); qt = setTimeout(() => { qt = null; render(false); }, 90); });
   q.addEventListener('focus', () => bar.classList.add('focus'));
   q.addEventListener('blur', () => bar.classList.remove('focus'));
 
@@ -398,7 +431,7 @@
     if (onButton && (e.key === 'Enter' || e.key === ' ')) return;   // a focused button presses itself
     if (e.key === 'ArrowDown') { e.preventDefault(); select(S.sel + 1, S.tab === 'shells' ? undefined : S.open); if (typing) list.focus(); return; }
     if (e.key === 'ArrowUp') { e.preventDefault(); select(S.sel - 1, S.tab === 'shells' ? undefined : S.open); if (typing) list.focus(); return; }
-    if (e.key === 'Enter') { e.preventDefault(); if (S.tab === 'rooms' && !S.open) select(S.sel, true); else primary(); return; }
+    if (e.key === 'Enter') { e.preventDefault(); if (qt) { clearTimeout(qt); qt = null; render(false); } if (S.tab === 'rooms' && !S.open) select(S.sel, true); else primary(); return; }
     if (e.key === 'Tab') return;   // Tab walks through the buttons as normal
     if (typing) return;
     if (/^[1-7]$/.test(e.key)) { e.preventDefault(); setTab(TABS[Number(e.key) - 1]); return; }
@@ -488,6 +521,13 @@
         S.here = m.here || null;
         if (m.pick !== undefined) S.pick = m.pick || null;
         S.pv = m.previewing || null;
+        S.src = store('dps-studio-src', 'lib');
+        if (!S.lib) fetch('library.json').then((r) => r.json()).then((d) => {
+          if (!d || !Array.isArray(d.groups)) throw new Error('bad');
+          // label and search words worked out once, not on every key press
+          for (const g of d.groups) g.items = g.items.map(([m, src]) => { const label = pretty(m); return { m, src, label, hay: `${m} ${label} ${src} ${g.label}`.toLowerCase() }; });
+          S.lib = d; if (S.shown && S.tab === 'place') render(true);
+        }).catch(() => { S.src = 'housing'; toast('The full library did not load, showing housing furniture', true); if (S.shown && S.tab === 'place') render(true); });
         (S.boot && !S.boot.missing ? Promise.resolve({ ok: true }) : post('boot').then((r) => {
           if (r && r.ok) {
             r.shells = Array.isArray(r.shells) ? r.shells : [];
@@ -498,6 +538,7 @@
         }))
           .then(() => { setTab(m.tab || store('dps-studio-tab', 'rooms')); list.focus(); });
         break;
+      case 'libBad': S.bad = new Set(Array.isArray(m.names) ? m.names : []); if (S.shown && S.tab === 'place') render(true); break;
       case 'hide': S.shown = false; clearTimeout(S.shellTimer); closeModal(); app.hidden = true; stage.hidden = true; break;
       case 'keys': showKeys(m); break;
       case 'prompt': showPrompt(m); break;

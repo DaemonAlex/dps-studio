@@ -31,8 +31,22 @@ local function furniture()
             lib.print.warn('furniture: could not read qs-housing config/furniture.lua, will try again next time')
             return cats, models
         end
+        -- the full library (html/library.json, built by tools/build_library.py): every game object
+        -- and every model the server streams. Any of them may be placed.
+        local libN = 0
+        local ok, library = pcall(json.decode, LoadResourceFile(RES, 'html/library.json') or '')
+        if ok and type(library) == 'table' and type(library.groups) == 'table' then
+            for _, g in ipairs(library.groups) do
+                for _, it in ipairs(type(g.items) == 'table' and g.items or {}) do
+                    local m = type(it) == 'table' and it[1]
+                    if type(m) == 'string' and not models[m] then models[m] = true; libN = libN + 1 end
+                end
+            end
+        else
+            lib.print.warn('library: html/library.json could not be read, only housing furniture can be placed')
+        end
         furnCats, furnModels = cats, models   -- kept only when it loaded
-        lib.print.info(('furniture: %d groups, %d pieces'):format(#furnCats, n))
+        lib.print.info(('furniture: %d groups, %d pieces, library adds %d'):format(#furnCats, n, libN))
     end
     return furnCats, furnModels
 end
