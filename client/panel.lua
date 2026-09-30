@@ -392,6 +392,20 @@ local function unlight()
 end
 StudioC.Unlight = unlight
 
+RegisterNUICallback('thumbs', function(_, cb) cb(lib.callback.await('dps-studio:thumbs', false) or {}) end)
+
+RegisterNUICallback('booth', function(d, cb)
+    local list = type(d.models) == 'table' and d.models or {}
+    if #list == 0 then return cb({ ok = false, err = 'Every piece here already has a picture' }) end
+    if GetResourceState('screencapture') ~= 'started' then return cb({ ok = false, err = 'The photo booth needs screencapture running' }) end
+    leave()
+    cb({ ok = true })
+    CreateThread(function()
+        StudioC.Booth(list)
+        show('place')
+    end)
+end)
+
 RegisterNUICallback('pieces', function(_, cb)
     local room = StudioC.RoomHere()
     if not room then return cb({ ok = false, err = 'Go into a room first' }) end

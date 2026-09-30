@@ -23,7 +23,7 @@
 
   const S = { tab: 'rooms', boot: null, rooms: [], spots: [], hist: [], scans: [], here: null, pick: null,
               items: [], sel: -1, open: false, chip: { place: 'all', lib: 'lighting', shells: 'all', spots: 'all' }, q: {}, shellTimer: null, shown: false, pv: null,
-              src: 'decorate', lib: null, bad: new Set(), more: 0, pieces: [] };
+              src: 'decorate', lib: null, bad: new Set(), more: 0, pieces: [], thumbs: {} };
   const LIB_ICON = { lighting: 'fa-lightbulb', seating: 'fa-couch', tables: 'fa-table', beds: 'fa-bed', storage: 'fa-box-archive', kitchen: 'fa-kitchen-set',
     bathroom: 'fa-bath', bar: 'fa-martini-glass', electronics: 'fa-tv', office: 'fa-briefcase', decor: 'fa-image', plants: 'fa-seedling', gym: 'fa-dumbbell',
     crime: 'fa-screwdriver-wrench', street: 'fa-road-barrier', other: 'fa-cube', mappieces: 'fa-puzzle-piece' };
@@ -148,7 +148,8 @@
       nm = esc(it.label); mt = `<code>${esc(it.name)}</code> · ${esc(it.shell)} · look <b>${esc(it.lookName)}</b>`;
       rt = pieceMeter(it.count, it.max) + (S.here === it.name ? '<span class="badge on">You are here</span>' : '');
     } else if (tab === 'place') {
-      thumb = it.img ? `<img src="${esc(it.img)}" alt="" loading="lazy">` : `<i class="fa-solid ${it.lib ? (LIB_ICON[it.gkey] || 'fa-cube') : 'fa-couch'}"></i>`;
+      const pic = it.img || S.thumbs[it.object];
+      thumb = pic ? `<img src="${esc(pic)}" alt="" loading="lazy">` : `<i class="fa-solid ${it.lib ? (LIB_ICON[it.gkey] || 'fa-cube') : 'fa-couch'}"></i>`;
       nm = esc(it.label);
       mt = it.piece ? `<code>${esc(it.object)}</code> · ${it.dist} m from you` : `<code>${esc(it.object)}</code> · ${esc(it.cat)}${it.lib ? ' · ' + esc(it.src === 'Game' ? 'game' : it.src) : ''}`;
       if (it.piece) thumb = '<i class="fa-solid fa-location-crosshairs"></i>';
@@ -220,7 +221,8 @@
     if (t === 'rooms') h = `<span class="grow">${S.rooms.length} rooms. A room is a door, a shell and saved looks of furniture.</span><button class="btn pri" data-a="newRoom">New room at my spot <kbd>N</kbd></button>`;
     else if (t === 'place') {
       const r = roomByName(S.here);
-      h = r ? `<span class="grow"><b>${esc(r.label)}</b> · look <b>${esc(r.lookName)}</b></span>${pieceMeter(r.count, r.max)}<button class="btn" data-a="showPieces">Move or remove <kbd>M</kbd></button>` : '';
+      const need = boothList().length;
+      h = r ? `<span class="grow"><b>${esc(r.label)}</b> · look <b>${esc(r.lookName)}</b></span>${pieceMeter(r.count, r.max)}<button class="btn" data-a="showPieces">Move or remove <kbd>M</kbd></button>${need ? `<button class="btn" data-a="booth"><i class="fa-solid fa-camera"></i>&nbsp;Take photos · ${need.toLocaleString('en-US')}</button>` : ''}` : '';
     } else if (t === 'shells') h = `<span class="grow">${S.boot ? S.boot.shells.length : 0} shells from the housing list. The one you pick floats in the sky so open shells show from every side.</span>`;
     else if (t === 'spots') h = `<span class="grow">${S.spots.length} spots, newest first.</span><button class="btn pri" data-a="markSpot">Mark my spot</button>`;
     else if (t === 'inspect') h = `<span class="grow">Hold middle mouse and aim. Close this panel first so you can look around.</span>`;
@@ -321,6 +323,27 @@
     post('tab', { tab: t }).then((r) => { if (r && r.here !== undefined) S.here = r.here || null; load(t); });
     render(same);
   }
+  // pieces on the chosen side (Decorate or Build) that still have no picture
+  function boothList() {
+    if (!S.lib || (S.src !== 'decorate' && S.src !== 'build')) return [];
+    const out = [];
+    for (const g of S.lib.groups) for (const it of g.items) if (it.use === S.src && !S.bad.has(it.m) && !S.thumbs[it.m]) out.push(it.m);
+    return out;
+  }
+  function loadThumbs() { return post('thumbs').then((t) => { if (t && typeof t === 'object' && !Array.isArray(t)) S.thumbs = t; if (S.shown && S.tab === 'place') render(true); }); }
+  // crop the middle of a full screenshot to a small square webp for the booth
+  function cropShot(model, dataUri) {
+    const img = new Image();
+    img.onload = () => {
+      const side = Math.min(img.width, img.height) * 0.92, sx = (img.width - side) / 2, sy = (img.height - side) / 2;
+      const c = document.createElement('canvas'); c.width = 224; c.height = 224;
+      c.getContext('2d').drawImage(img, sx, sy, side, side, 0, 0, 224, 224);
+      const out = c.toDataURL('image/webp', 0.78);
+      post('cropDone', { model, b64: out.slice(out.indexOf(',') + 1) });
+    };
+    img.onerror = () => post('cropDone', { model, b64: false });
+    img.src = dataUri;
+  }
   function loadPieces() {
     return post('pieces').then((r) => { S.pieces = (r && r.ok && Array.isArray(r.pieces)) ? r.pieces : []; if (S.tab === 'place' && S.src === 'pieces') render(true); });
   }
@@ -395,6 +418,17 @@
         post('roomDelete', { name: it.name }).then((r) => { if (result(r, 'Removed')) load(); }); return;
       }
       case 'edit': case 'showPieces': setSrc('pieces'); return;
+      case 'booth': {
+        let list = boothList();
+        const first = Object.keys(S.thumbs).length === 0;
+        if (first) list = list.slice(0, 10);   // first run is a test of ten, to check the pictures look right
+        const mins = Math.ceil(list.length * 1.4 / 60);
+        const text = first
+          ? 'First run: 10 pieces as a test, under a minute. Then look at their pictures in the list. If they look right, press Take photos again for the rest.'
+          : `${list.length.toLocaleString('en-US')} pieces still need a picture, about ${mins} minutes. The panel closes and the booth runs on its own. Leave the game running. Backspace stops it, and it carries on next time.`;
+        if (!await confirmBox('Photo booth', text, 'Start')) return;
+        post('booth', { models: list }).then((r) => result(r)); return;
+      }
       case 'pieceMove': if (it && it.piece) post('pieceMove', { id: it.id }).then((r) => result(r)); return;
       case 'pieceRemove': if (it && it.piece) post('pieceRemove', { id: it.id }).then((r) => { if (result(r, 'Removed. History can put it back.')) loadPieces(); }); return;
       case 'place': if (it) post('place', { model: it.object }).then((r) => result(r)); return;
@@ -546,6 +580,7 @@
         S.here = m.here || null;
         if (m.pick !== undefined) S.pick = m.pick || null;
         S.pv = m.previewing || null;
+        loadThumbs();
         S.src = store('dps-studio-src', 'decorate'); if (!['decorate', 'build', 'housing'].includes(S.src)) S.src = 'decorate';
         if (!S.lib) fetch('library.json').then((r) => r.json()).then((d) => {
           if (!d || !Array.isArray(d.groups)) throw new Error('bad');
@@ -567,6 +602,7 @@
         }))
           .then(() => { setTab(m.tab || store('dps-studio-tab', 'rooms')); list.focus(); });
         break;
+      case 'crop': if (m.model && m.data) cropShot(m.model, m.data); break;
       case 'libBad': S.bad = new Set(Array.isArray(m.names) ? m.names : []); if (S.shown && S.tab === 'place') render(true); break;
       case 'hide': S.shown = false; clearTimeout(S.shellTimer); closeModal(); app.hidden = true; stage.hidden = true; break;
       case 'keys': showKeys(m); break;

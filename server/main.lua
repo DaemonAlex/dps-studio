@@ -79,6 +79,11 @@ local TABLES = {
         by_name VARCHAR(64) DEFAULT NULL,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (id))]],
+    [[CREATE TABLE IF NOT EXISTS dps_studio_thumbs (
+        model VARCHAR(96) NOT NULL,
+        url VARCHAR(400) NOT NULL,
+        at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (model))]],
     [[CREATE TABLE IF NOT EXISTS dps_studio_meta (
         k VARCHAR(40) NOT NULL, v VARCHAR(200) DEFAULT NULL, PRIMARY KEY (k))]],
 }
@@ -468,4 +473,69 @@ end)
 AddEventHandler('playerJoining', function()
     local src = source
     if allowed(src) then TriggerClientEvent('dps-studio:admin', src, true) end
+end)
+
+
+-- ---------------------------------------------------------------- admin: photos
+-- The photo booth (client/booth.lua) sends one small webp per piece; the server puts it on
+-- the Fivemanage image host with the key kept in the server-only convar dps:fivemanage_image
+-- and keeps the picture link here. Players never download the pictures; the panel shows them.
+local FM_URL = 'https://api.fivemanage.com/api/v3/file/base64'
+local thumbs = {}   -- model -> url
+local busyUpload = {}
+
+CreateThread(function()
+    while not ready do Wait(500) end
+    for _, row in ipairs(MySQL.query.await('SELECT model, url FROM dps_studio_thumbs') or {}) do thumbs[row.model] = row.url end
+    local n = 0
+    for _ in pairs(thumbs) do n = n + 1 end
+    lib.print.info(('photos: %d on file'):format(n))
+end)
+
+-- One picture of the asking admin's game view, through screencapture (already on the server
+-- for qs-housing). Returns a data URI of a 960 x 540 webp, or false.
+lib.callback.register('dps-studio:shoot', function(src)
+    if not allowed(src) then return false end
+    if GetResourceState('screencapture') ~= 'started' then return false end
+    local p, settled = promise.new(), false
+    local function settle(v) if not settled then settled = true; p:resolve(v) end end
+    local ok = pcall(function()
+        exports.screencapture:serverCapture(src, { encoding = 'webp', maxWidth = 960, maxHeight = 540 }, settle)
+    end)
+    if not ok then return false end
+    SetTimeout(8000, function() settle(false) end)
+    local data = Citizen.Await(p)
+    return type(data) == 'string' and data or false
+end)
+
+lib.callback.register('dps-studio:thumbs', function(src)
+    if not allowed(src) then return nil end
+    return thumbs
+end)
+
+lib.callback.register('dps-studio:thumbSave', function(src, model, b64)
+    if not allowed(src) then return false, 'Studio is for admins' end
+    local _, models = furniture()
+    if type(model) ~= 'string' or not models[model] then return false, 'Not a library piece' end
+    if type(b64) ~= 'string' or #b64 < 200 or #b64 > 120000 or b64:find('[^%w%+/=]') then return false, 'Bad picture' end
+    local key = GetConvar('dps:fivemanage_image', '')
+    if key == '' then return false, 'No Fivemanage key on the server' end
+    if busyUpload[model] then return false, 'Already sending that one' end
+    busyUpload[model] = true
+    local p = promise.new()
+    PerformHttpRequest(FM_URL, function(code, body)
+        p:resolve({ code = code, body = body })
+    end, 'POST', json.encode({ base64 = 'data:image/webp;base64,' .. b64, filename = model .. '.webp', path = 'dps-studio/thumbs', metadata = json.encode({ model = model }) }),
+        { ['Content-Type'] = 'application/json', ['Authorization'] = key })
+    local res = Citizen.Await(p)
+    busyUpload[model] = nil
+    local ok, data = pcall(json.decode, res.body or '')
+    local url = ok and type(data) == 'table' and type(data.data) == 'table' and data.data.url
+    if res.code ~= 200 or type(url) ~= 'string' or not url:match('^https://') then
+        lib.print.warn(('photo upload for %s failed: HTTP %s %s'):format(model, tostring(res.code), tostring(res.body):sub(1, 160)))
+        return false, 'Upload failed (HTTP ' .. tostring(res.code) .. ')'
+    end
+    thumbs[model] = url
+    MySQL.query.await('INSERT INTO dps_studio_thumbs (model, url) VALUES (?, ?) ON DUPLICATE KEY UPDATE url = VALUES(url)', { model, url })
+    return true, url
 end)

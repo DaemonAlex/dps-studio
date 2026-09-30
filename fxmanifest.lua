@@ -5,7 +5,7 @@ lua54 'yes'
 name 'dps-studio'
 author 'Del Perro Sands'
 description 'DPS Studio (/admin): build the rooms players use every day. Rooms, saved looks, furniture, shells, inspect, spots, doors and history on one panel.'
-version '1.1.0'
+version '1.2.0'
 
 shared_scripts {
     '@ox_lib/init.lua',
@@ -17,6 +17,7 @@ client_scripts {
     'client/place.lua',
     'client/inspect.lua',
     'client/mark.lua',
+    'client/booth.lua',
     'client/panel.lua',
 }
 server_scripts {
