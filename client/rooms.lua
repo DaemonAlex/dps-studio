@@ -1,0 +1,256 @@
+-- CLIENT (every player). Runs every room: the shell and the active look's pieces sit
+-- Studio.DEPTH metres under the door, spawned only while the player is within 250 m and
+-- deleted when they leave (client-only objects, ox_lib points, no polling loops).
+-- The door and the way out are 2 m points: E fades the screen and moves the player.
+-- Prompts are drawn by the Studio NUI page in the DPS look (no focus taken).
+-- The server sends one room at a time when it changes, so an edit only redraws that room.
+
+StudioC = StudioC or {}
+StudioC.rooms = {}            -- name -> { data = public room, shellPos, out, door }
+StudioC.pieceByEntity = {}    -- entity -> { name, id, model }
+
+local points = {}             -- name -> { point, point, point }
+local shells, pieces = {}, {} -- name -> entity / { entities }
+local gen = {}                -- name -> number, bumped whenever a room is torn down
+local spawning = {}           -- name -> true while its models load
+local prompt                  -- the key of the prompt showing
+
+local function nui(msg) SendNUIMessage(msg) end
+
+local function spawn(model, pos, h)
+    local hash = joaat(model)
+    if not IsModelInCdimage(hash) or not pcall(lib.requestModel, hash, 15000) then return end
+    local o = CreateObjectNoOffset(hash, pos.x, pos.y, pos.z, false, false, false)
+    SetEntityHeading(o, (h or 0.0) + 0.0)
+    FreezeEntityPosition(o, true)
+    SetModelAsNoLongerNeeded(hash)
+    return o
+end
+
+local function despawn(name)
+    gen[name] = (gen[name] or 0) + 1   -- any spawn still loading for this room drops its objects
+    spawning[name] = nil
+    if shells[name] and DoesEntityExist(shells[name]) then DeleteEntity(shells[name]) end
+    shells[name] = nil
+    for _, o in ipairs(pieces[name] or {}) do
+        StudioC.pieceByEntity[o] = nil
+        if DoesEntityExist(o) then DeleteEntity(o) end
+    end
+    pieces[name] = nil
+end
+
+---Spawns a room's shell and pieces if they are not there. Safe to call twice: the
+---second call waits for the first. Returns true when the shell exists.
+function StudioC.SpawnRoom(name)
+    local r = StudioC.rooms[name]
+    if not r then return false end
+    if shells[name] and DoesEntityExist(shells[name]) then return true end
+    if spawning[name] then
+        -- another call is loading it: the floor is enough, the furniture can follow
+        local t = GetGameTimer() + 20000
+        while spawning[name] and not shells[name] and GetGameTimer() < t do Wait(50) end
+        return shells[name] ~= nil and DoesEntityExist(shells[name])
+    end
+    spawning[name] = true
+    local ok, res = pcall(function() return StudioC._spawnBody(name, r) end)
+    if not ok then
+        spawning[name] = nil
+        print(('^1[dps-studio] room %s did not spawn: %s^7'):format(name, tostring(res)))
+        return false
+    end
+    return res
+end
+
+function StudioC._spawnBody(name, r)
+    local my = gen[name] or 0
+    local function stale(o)
+        if (gen[name] or 0) ~= my or StudioC.rooms[name] ~= r then
+            if o and DoesEntityExist(o) then DeleteEntity(o) end
+            return true
+        end
+    end
+    local shell = spawn(r.data.shell, r.shellPos)
+    if stale(shell) then return false end
+    if not shell then spawning[name] = nil; return false end
+    shells[name] = shell
+    local list = {}
+    pieces[name] = list
+    for _, q in ipairs(r.data.pieces or {}) do
+        local o = spawn(q.model, r.shellPos + vec3(q.x, q.y, q.z), q.h)
+        if stale(o) then return false end
+        if o then
+            list[#list + 1] = o
+            StudioC.pieceByEntity[o] = { name = name, id = q.id, model = q.model, at = q }
+        end
+    end
+    spawning[name] = nil
+    return true
+end
+
+---The room the player is inside: under its door and near its shell.
+function StudioC.RoomHere()
+    local me = GetEntityCoords(cache.ped)
+    local best, bestD
+    for name, r in pairs(StudioC.rooms) do
+        local d = #(me - r.shellPos)
+        if d < 120.0 and me.z < r.door.z - Studio.DEPTH / 2 and (not bestD or d < bestD) then best, bestD = name, d end
+    end
+    return best
+end
+
+---Fade, move, face, fade back. When moving into a room, its shell must exist first,
+---or the player stays where they are (never dropped under the map).
+function StudioC.Move(to, heading, roomName)
+    if cache.vehicle then return lib.notify({ type = 'error', description = 'Get out of the vehicle first' }) end
+    DoScreenFadeOut(300)
+    Wait(350)
+    if roomName and not StudioC.SpawnRoom(roomName) then
+        DoScreenFadeIn(300)
+        return lib.notify({ type = 'error', description = 'This room did not load. Try again in a moment.' })
+    end
+    local ped = cache.ped
+    FreezeEntityPosition(ped, true)
+    RequestCollisionAtCoord(to.x, to.y, to.z)
+    SetEntityCoords(ped, to.x, to.y, to.z - 1.0, false, false, false, false)
+    SetEntityHeading(ped, (heading or 0.0) + 0.0)
+    Wait(500)
+    FreezeEntityPosition(ped, false)
+    DoScreenFadeIn(300)
+    return true
+end
+
+local function door(key, coords, text, onUse)
+    return lib.points.new({
+        coords = coords,
+        distance = 2.0,
+        onEnter = function() prompt = key; nui({ action = 'prompt', key = 'E', text = text }) end,
+        onExit = function() if prompt == key then prompt = nil; nui({ action = 'prompt' }) end end,
+        nearby = function()
+            if IsControlJustPressed(0, 38) and not StudioC.busy and not StudioC.moving then
+                prompt = nil
+                nui({ action = 'prompt' })
+                StudioC.moving = true
+                CreateThread(function()
+                    pcall(onUse)
+                    StudioC.moving = false
+                end)
+            end
+        end,
+    })
+end
+
+local function removeRoom(name)
+    for _, p in ipairs(points[name] or {}) do p:remove() end
+    points[name] = nil
+    if prompt and prompt:find(name .. ':', 1, true) == 1 then prompt = nil; nui({ action = 'prompt' }) end
+    local had = shells[name] ~= nil
+    despawn(name)
+    StudioC.rooms[name] = nil
+    return had
+end
+
+local function addRoom(p, respawn)
+    local name = p.name
+    if type(name) ~= 'string' or type(p.shell) ~= 'string' then return end
+    local doorPos = vec3(p.entrance.x, p.entrance.y, p.entrance.z)
+    local shellPos = doorPos - vec3(0.0, 0.0, Studio.DEPTH)
+    local out = shellPos + vec3(p.exit.x, p.exit.y, p.exit.z)
+    StudioC.rooms[name] = { data = p, shellPos = shellPos, out = out, door = doorPos }
+    points[name] = {
+        lib.points.new({
+            coords = shellPos,
+            distance = 250.0,
+            onEnter = function() CreateThread(function() StudioC.SpawnRoom(name) end) end,   -- never stall the points loop
+            onExit = function() despawn(name) end,
+        }),
+        door(name .. ':in', doorPos, 'Enter ' .. p.label, function() StudioC.Move(out, p.exit.h, name) end),
+        door(name .. ':out', out, 'Leave ' .. p.label, function() StudioC.Move(doorPos, (p.entrance.h + 180.0) % 360.0) end),
+    }
+    if respawn then CreateThread(function() StudioC.SpawnRoom(name) end) end   -- redraw at once after an edit
+end
+
+local function setAll(list)
+    for name in pairs(StudioC.rooms) do removeRoom(name) end
+    for _, p in ipairs(list or {}) do addRoom(p, false) end
+end
+
+local function same(a, b) return a.x == b.x and a.y == b.y and a.z == b.z and a.h == b.h end
+
+---Only the furniture changed: keep the shell (nobody loses the floor) and swap just the
+---pieces that were added, moved or removed.
+local function updatePieces(name, p)
+    local r = StudioC.rooms[name]
+    local list = pieces[name]
+    if not list or spawning[name] then
+        -- still loading: start that room over, so the new pieces are the ones that load
+        removeRoom(name)
+        return addRoom(p, true)
+    end
+    r.data = p
+    local want = {}
+    for _, q in ipairs(p.pieces or {}) do want[q.id] = q end
+    local keep = {}
+    for _, o in ipairs(list) do
+        local info = StudioC.pieceByEntity[o]
+        local q = info and want[info.id]
+        local cur = DoesEntityExist(o) and GetEntityCoords(o)
+        if q and info.model == q.model and info.at and same(info.at, q) and cur and IsEntityVisible(o) then
+            keep[#keep + 1] = o
+            want[info.id] = nil
+        else
+            StudioC.pieceByEntity[o] = nil
+            if DoesEntityExist(o) then DeleteEntity(o) end
+        end
+    end
+    pieces[name] = keep
+    local my = gen[name] or 0
+    CreateThread(function()
+        for _, q in pairs(want) do
+            local o = spawn(q.model, r.shellPos + vec3(q.x, q.y, q.z), q.h)
+            if (gen[name] or 0) ~= my or pieces[name] ~= keep then
+                if o and DoesEntityExist(o) then DeleteEntity(o) end
+                return
+            end
+            if o then
+                keep[#keep + 1] = o
+                StudioC.pieceByEntity[o] = { name = name, id = q.id, model = q.model, at = q }
+            end
+        end
+    end)
+end
+
+-- One room changed (p = false when it was removed).
+RegisterNetEvent('dps-studio:room', function(name, p)
+    local old = StudioC.rooms[name]
+    if p and old and old.data.shell == p.shell and same(old.data.entrance, p.entrance) and same(old.data.exit, p.exit) and shells[name] then
+        if old.data.label ~= p.label then
+            -- new door words: swap only the two door prompts, the shell stays under everyone
+            local pts = points[name]
+            for i = 2, 3 do if pts[i] then pts[i]:remove() end end
+            if prompt and prompt:find(name .. ':', 1, true) == 1 then prompt = nil; nui({ action = 'prompt' }) end
+            local r = old
+            pts[2] = door(name .. ':in', r.door, 'Enter ' .. p.label, function() StudioC.Move(r.out, p.exit.h, name) end)
+            pts[3] = door(name .. ':out', r.out, 'Leave ' .. p.label, function() StudioC.Move(r.door, (p.entrance.h + 180.0) % 360.0) end)
+        end
+        return updatePieces(name, p)
+    end
+    local had = removeRoom(name)
+    if p then addRoom(p, had) end
+end)
+
+RegisterNetEvent('dps-studio:rooms', setAll)
+
+CreateThread(function()
+    setAll(lib.callback.await('dps-studio:rooms', false))
+end)
+
+AddEventHandler('onResourceStop', function(res)
+    if res ~= GetCurrentResourceName() then return end
+    -- anyone inside a room goes back to its door before the room disappears
+    local here = StudioC.RoomHere()
+    local r = here and StudioC.rooms[here]
+    if r then SetEntityCoords(cache.ped, r.door.x, r.door.y, r.door.z, false, false, false, false) end
+    FreezeEntityPosition(cache.ped, false)
+    if IsScreenFadedOut() or IsScreenFadingOut() then DoScreenFadeIn(0) end
+    for name in pairs(StudioC.rooms) do removeRoom(name) end
+end)

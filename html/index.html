@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>DPS Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700&family=Roboto:wght@400;500;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="stage" hidden></div>
+<div id="app" hidden>
+  <div id="bar" role="dialog" aria-label="DPS Studio">
+    <div id="grip" title="Drag to move"><i class="fa-solid fa-grip-vertical"></i></div>
+    <img class="mark" src="nui://wasabi_multichar/ui/build/logo.png" alt="" onerror="this.hidden=true">
+    <span class="t">STUDIO</span>
+    <i class="fa-solid fa-magnifying-glass lens"></i>
+    <input id="q" type="text" autocomplete="off" spellcheck="false" placeholder="Search…">
+    <span id="cnt" class="cnt"></span>
+    <button id="fleet" class="x" title="Open Fleet"><i class="fa-solid fa-car-side"></i></button>
+    <button id="close" class="x" title="Close (Esc)"><i class="fa-solid fa-xmark"></i></button>
+    <div id="wgrip" title="Drag to widen"></div>
+  </div>
+  <div id="panel">
+    <div class="modes" id="tabs" role="tablist">
+      <button class="mode" data-t="rooms"><i class="fa-solid fa-door-open"></i>Rooms</button>
+      <button class="mode" data-t="place"><i class="fa-solid fa-couch"></i>Place</button>
+      <button class="mode" data-t="shells"><i class="fa-solid fa-cube"></i>Shells</button>
+      <button class="mode" data-t="inspect"><i class="fa-solid fa-crosshairs"></i>Inspect</button>
+      <button class="mode" data-t="spots"><i class="fa-solid fa-location-dot"></i>Spots</button>
+      <button class="mode" data-t="doors"><i class="fa-solid fa-lock"></i>Doors</button>
+      <button class="mode" data-t="history"><i class="fa-solid fa-clock-rotate-left"></i>History</button>
+    </div>
+    <div id="banner" hidden></div>
+    <div id="head"></div>
+    <div class="chips" id="chips" hidden></div>
+    <div id="list" tabindex="0" role="listbox" aria-label="Items"></div>
+    <div class="foot"><span id="hint"></span><span id="hgrip" title="Drag to change height"></span></div>
+    <div id="modal" hidden></div>
+  </div>
+  <div id="toast"></div>
+</div>
+<div id="keys" hidden></div>
+<div id="prompt" hidden></div>
+<div id="card" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>
