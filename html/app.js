@@ -23,7 +23,12 @@
 
   const S = { tab: 'rooms', boot: null, rooms: [], spots: [], hist: [], scans: [], here: null, pick: null,
               items: [], sel: -1, open: false, chip: { place: 'all', lib: 'lighting', shells: 'all', spots: 'all' }, q: {}, shellTimer: null, shown: false, pv: null,
-              src: 'decorate', lib: null, bad: new Set(), more: 0, pieces: [], thumbs: {} };
+              src: 'decorate', lib: null, bad: new Set(), more: 0, pieces: [], thumbs: {},
+              shellSrc: 'shells', ipls: null, iplStyle: {}, styling: null };
+  const iplLabel = (exp) => { const e = (S.ipls || []).find((x) => x.export === exp); return e ? e.label : exp; };
+  const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};   // an empty Lua table arrives as []
+  const styleOf = (exp) => S.iplStyle[exp] || (S.iplStyle[exp] = { preset: 'default', choice: {}, on: {} });
+  const PRESET = { default: 'As the game has it', full: 'Full, everything on', empty: 'Empty', custom: 'Pick each part' };
   const LIB_ICON = { lighting: 'fa-lightbulb', seating: 'fa-couch', tables: 'fa-table', beds: 'fa-bed', storage: 'fa-box-archive', kitchen: 'fa-kitchen-set',
     bathroom: 'fa-bath', bar: 'fa-martini-glass', electronics: 'fa-tv', office: 'fa-briefcase', decor: 'fa-image', plants: 'fa-seedling', gym: 'fa-dumbbell',
     crime: 'fa-screwdriver-wrench', street: 'fa-road-barrier', other: 'fa-cube', mappieces: 'fa-puzzle-piece' };
@@ -124,6 +129,10 @@
         return out;
       }
       case 'shells': {
+        if (S.shellSrc === 'ipls') {
+          return (S.ipls || []).filter((e) => (S.chip.ipls === undefined || S.chip.ipls === 'all' || e.group === S.chip.ipls) && match(`${e.label} ${e.group} ${e.export}`))
+            .map((e) => ({ ipl: true, export: e.export, label: e.label, group: e.group, groups: e.groups, model: e.export }));
+        }
         if (!S.boot) return [];
         const meta = S.boot.meta || {};
         return S.boot.shells.filter((m) => (S.chip.shells === 'all' || (meta[m] && meta[m].use === S.chip.shells)) && match(shellWords(m))).map((m) => ({ model: m, meta: meta[m] }));
@@ -145,7 +154,7 @@
     let thumb = '', nm = '', mt = '', rt = '';
     if (tab === 'rooms') {
       thumb = '<i class="fa-solid fa-door-open"></i>';
-      nm = esc(it.label); mt = `<code>${esc(it.name)}</code> · ${esc(it.shell)} · look <b>${esc(it.lookName)}</b>`;
+      nm = esc(it.label); mt = `<code>${esc(it.name)}</code> · ${esc(it.kind === 'ipl' ? iplLabel(it.ipl) : it.shell)} · look <b>${esc(it.lookName)}</b>`;
       rt = pieceMeter(it.count, it.max) + (S.here === it.name ? '<span class="badge on">You are here</span>' : '');
     } else if (tab === 'place') {
       const pic = it.img || S.thumbs[it.object];
@@ -153,6 +162,12 @@
       nm = esc(it.label);
       mt = it.piece ? `<code>${esc(it.object)}</code> · ${it.dist} m from you` : `<code>${esc(it.object)}</code> · ${esc(it.cat)}${it.lib ? ' · ' + esc(it.src === 'Game' ? 'game' : it.src) : ''}`;
       if (it.piece) thumb = '<i class="fa-solid fa-location-crosshairs"></i>';
+    } else if (tab === 'shells' && it.ipl) {
+      thumb = '<i class="fa-solid fa-building"></i>';
+      nm = esc(it.label); mt = `${esc(it.group)} · ${it.groups.length ? it.groups.length + ' style parts' : 'one look'}`;
+      const owner = S.rooms.find((r) => r.kind === 'ipl' && r.ipl === it.export);
+      if (S.styling && S.styling.export === it.export) rt = '<span class="badge on">Styling</span>';
+      else if (owner) rt = `<span class="badge">Used by ${esc(owner.label)}</span>`;
     } else if (tab === 'shells') {
       const m = it.meta;
       thumb = `<i class="fa-solid ${m && m.use === 'garage' ? 'fa-warehouse' : m && m.use === 'business' ? 'fa-briefcase' : 'fa-cube'}"></i>`;
@@ -185,13 +200,33 @@
           <button data-a="goDoor">Go to the door</button></div>
         <span class="lbl">Looks · switching changes the room for everyone</span><div class="looks">${looks}</div>
         <div class="acts"><button data-a="lookNewCopy">New look from this one</button><button data-a="lookNewEmpty">New empty look</button><button data-a="label">Change door words</button></div>
-        <span class="lbl">Door and shell</span>
-        <div class="acts"><button data-a="door">Move the door to me</button><button data-a="redo">Change shell or way out</button><button data-a="copy">Copy room to my spot</button></div>
+        <span class="lbl">Door and ${it.kind === 'ipl' ? 'interior' : 'shell'}</span>
+        <div class="acts"><button data-a="door">Move the door to me</button><button data-a="redo">Change ${it.kind === 'ipl' ? 'interior' : 'shell'} or way out</button><button data-a="copy">Copy room to my spot</button></div>
+        ${it.kind === 'ipl' ? `<p>Interior: <b>${esc(iplLabel(it.ipl))}</b> · style: ${esc(PRESET[(it.style || {}).preset] || PRESET.default)}</p><div class="acts"><button data-a="restyle">Change style</button></div>` : ''}
         <div class="acts"><button class="bad" data-a="delete">Remove room</button></div>
         <p>Last change: ${esc(it.updatedBy || '-')} · ${esc(it.updatedAt || '-')}</p></div>`;
     }
     if (tab === 'place' && it.piece) return `<div class="det"><p>This piece is lit up orange in the room.</p><div class="acts"><button class="pri" data-a="pieceMove">Move it <kbd>Enter</kbd></button><button class="bad" data-a="pieceRemove">Remove <kbd>Delete</kbd></button><button data-a="copyName">Copy name</button></div></div>`;
     if (tab === 'place') return `<div class="det"><div class="acts"><button class="pri" data-a="place">Place it <kbd>Enter</kbd></button><button data-a="copyName">Copy name</button></div></div>`;
+    if (tab === 'shells' && it.ipl) {
+      const st = styleOf(it.export);
+      const presets = Object.keys(PRESET).map((k) => `<button class="chip${st.preset === k ? ' on' : ''}" data-a="iplPreset" data-v="${k}">${esc(PRESET[k])}</button>`).join('');
+      let parts = '';
+      if (st.preset === 'custom') {
+        parts = it.groups.map((g) => {
+          const chips = g.options.map((o) => {
+            const on = g.kind === 'many' ? !!(st.on[g.key] && st.on[g.key][o]) : st.choice[g.key] === o;
+            return `<button class="chip${on ? ' on' : ''}" data-a="iplOpt" data-g="${esc(g.key)}" data-o="${esc(o)}" data-k="${g.kind}">${esc(o)}</button>`;
+          }).join('');
+          const none = g.kind === 'many' ? '' : `<button class="chip${!st.choice[g.key] ? ' on' : ''}" data-a="iplOpt" data-g="${esc(g.key)}" data-o="" data-k="${g.kind}">none</button>`;
+          return `<span class="lbl">${esc(g.key)}${g.kind === 'many' ? ' · switch each on or off' : ''}</span><div class="chips inl">${none}${chips}</div>`;
+        }).join('') || '<p>This interior has no parts to pick.</p>';
+      }
+      const how = S.pick ? '<p>Go inside, stand where people should arrive, face into the room and press <kbd>G</kbd>.</p>' : '<p>Go inside to see it. Style changes show straight away while you are in there.</p>';
+      const save = S.styling && S.styling.export === it.export ? '<button class="pri" data-a="saveStyle">Save style to the room</button>' : '';
+      return `<div class="det">${how}<span class="lbl">Style</span><div class="chips inl">${presets}</div>${parts}
+        <div class="acts">${save}<button class="${save ? '' : 'pri'}" data-a="iplGo">Go inside <kbd>Enter</kbd></button><button data-a="copyName">Copy name</button></div></div>`;
+    }
     if (tab === 'shells') {
       const pick = S.pick ? `<p>Walk inside, find where people should arrive, face into the room and press <kbd>G</kbd>.</p>` : '';
       return `<div class="det">${pick}<div class="acts"><button class="pri" data-a="walk">Walk inside <kbd>Enter</kbd></button><button data-a="copyName">Copy name</button><button data-a="stop">Stop preview</button></div></div>`;
@@ -215,14 +250,17 @@
   /* ---------- render ---------- */
   function renderHead() {
     const t = S.tab;
-    banner.hidden = !(S.pick && (t === 'rooms' || t === 'shells'));
-    if (!banner.hidden) banner.innerHTML = `<span>Making <b>${esc(S.pick.label)}</b>: pick a shell, press Walk inside, then <kbd>G</kbd> at the way out.</span><button class="btn" data-a="pickCancel">Cancel</button>`;
+    banner.hidden = !((S.pick || S.styling) && (t === 'rooms' || t === 'shells'));
+    if (!banner.hidden && S.pick) banner.innerHTML = `<span>Making <b>${esc(S.pick.label)}</b>: pick a shell or an interior, go inside, then <kbd>G</kbd> at the way out.</span><button class="btn" data-a="pickCancel">Cancel</button>`;
+    else if (!banner.hidden) banner.innerHTML = `<span>Styling <b>${esc(S.styling.label)}</b>: pick a style, then Save style to the room.</span><button class="btn" data-a="stylingCancel">Cancel</button>`;
     let h = '';
     if (t === 'rooms') h = `<span class="grow">${S.rooms.length} rooms. A room is a door, a shell and saved looks of furniture.</span><button class="btn pri" data-a="newRoom">New room at my spot <kbd>N</kbd></button>`;
     else if (t === 'place') {
       const r = roomByName(S.here);
       h = (r ? `<span class="grow"><b>${esc(r.label)}</b> · look <b>${esc(r.lookName)}</b></span>${pieceMeter(r.count, r.max)}<button class="btn" data-a="showPieces">Move or remove <kbd>M</kbd></button>` : '<span class="grow">Place</span>') + boothButton();
-    } else if (t === 'shells') h = `<span class="grow">${S.boot ? S.boot.shells.length : 0} shells from the housing list. The one you pick floats in the sky so open shells show from every side.</span>`;
+    } else if (t === 'shells') h = S.shellSrc === 'ipls'
+      ? `<span class="grow">${S.ipls ? S.ipls.length : 0} game interiors. Each one serves one room.</span>`
+      : `<span class="grow">${S.boot ? S.boot.shells.length : 0} shells from the housing list. The one you pick floats in the sky so open shells show from every side.</span>`;
     else if (t === 'spots') h = `<span class="grow">${S.spots.length} spots, newest first.</span><button class="btn pri" data-a="markSpot">Mark my spot</button>`;
     else if (t === 'inspect') h = `<span class="grow">Hold middle mouse and aim. Close this panel first so you can look around.</span>`;
     head.innerHTML = h;
@@ -235,9 +273,15 @@
       else if (S.boot) c = srcs + [['all', 'All']].concat(S.boot.furniture.map((f) => [f.key, f.label])).map(([k, l]) => `<button class="chip${S.chip.place === k ? ' on' : ''}" data-c="${esc(k)}">${esc(l)}</button>`).join('');
       else c = srcs;
     }
-    else if (t === 'shells' && S.boot) {
-      const uses = Array.from(new Set(Object.values(S.boot.meta || {}).map((m) => m.use))).sort();
-      c = [['all', 'All']].concat(uses.map((u) => [u, u])).map(([k, l]) => `<button class="chip${S.chip.shells === k ? ' on' : ''}" data-c="${esc(k)}">${esc(l)}</button>`).join('');
+    else if (t === 'shells') {
+      const srcs = `<button class="chip src${S.shellSrc === 'shells' ? ' on' : ''}" data-ss="shells"><i class="fa-solid fa-cube"></i> Shells</button><button class="chip src${S.shellSrc === 'ipls' ? ' on' : ''}" data-ss="ipls"><i class="fa-solid fa-building"></i> Interiors${S.ipls ? ' · ' + S.ipls.length : ''}</button><span class="brk"></span>`;
+      if (S.shellSrc === 'ipls') {
+        const groups = Array.from(new Set((S.ipls || []).map((e) => e.group))).sort();
+        c = srcs + [['all', 'All']].concat(groups.map((g) => [g, g])).map(([k, l]) => `<button class="chip${(S.chip.ipls || 'all') === k ? ' on' : ''}" data-c="${esc(k)}">${esc(l)}</button>`).join('');
+      } else if (S.boot) {
+        const uses = Array.from(new Set(Object.values(S.boot.meta || {}).map((m) => m.use))).sort();
+        c = srcs + [['all', 'All']].concat(uses.map((u) => [u, u])).map(([k, l]) => `<button class="chip${S.chip.shells === k ? ' on' : ''}" data-c="${esc(k)}">${esc(l)}</button>`).join('');
+      } else c = srcs;
     } else if (t === 'spots') c = [['all', 'All'], ['spot', 'Spots'], ['pos', 'F3 coords']].map(([k, l]) => `<button class="chip${S.chip.spots === k ? ' on' : ''}" data-c="${k}">${l}</button>`).join('');
     chips.innerHTML = c; chips.hidden = !c;
   }
@@ -248,7 +292,7 @@
     hint.innerHTML = HINTS[t] || '';
     document.querySelectorAll('.mode').forEach((b) => b.classList.toggle('on', b.dataset.t === t));
     q.disabled = t === 'doors'; q.placeholder = PH[t] || '';
-    stage.hidden = !(t === 'shells' && S.shown);
+    stage.hidden = !(t === 'shells' && S.shown && S.shellSrc !== 'ipls');
     if (t === 'doors') { list.innerHTML = doorsDoc(); S.items = []; $('#cnt').textContent = ''; return; }
     if (t === 'place' && S.here && (S.src === 'decorate' || S.src === 'build') && !S.lib) { renderHead(); list.innerHTML = '<div class="empty"><b>Loading the library…</b></div>'; S.items = []; return; }
     if (t === 'place' && !S.here) { renderHead(); list.innerHTML = placeEmpty(); S.items = []; $('#cnt').textContent = ''; return; }
@@ -295,14 +339,14 @@
     r.classList.add('sel');
     if (S.open || S.tab === 'shells') r.insertAdjacentHTML('beforeend', detHtml(S.tab, S.items[i]));
     if (!noScroll) r.scrollIntoView({ block: 'nearest' });
-    if (S.tab === 'shells') previewSoon(S.items[i].model);
+    if (S.tab === 'shells' && !S.items[i].ipl) previewSoon(S.items[i].model);
     if (S.tab === 'place' && S.src === 'pieces' && S.items[i].piece) post('highlight', { id: S.items[i].id });
   }
 
   /* ---------- loading ---------- */
   function load(tab) {
     const t = tab || S.tab;
-    if (t === 'rooms' || t === 'place') {
+    if (t === 'rooms' || t === 'place' || t === 'shells') {
       if (t === 'place' && S.src === 'pieces') loadPieces();
       return post('rooms').then((r) => { S.rooms = Array.isArray(r) ? r : []; if (S.tab === t) render(true); });
     }
@@ -423,6 +467,38 @@
         post('roomDelete', { name: it.name }).then((r) => { if (result(r, 'Removed')) load(); }); return;
       }
       case 'edit': case 'showPieces': setSrc('pieces'); return;
+      case 'iplGo': if (it && it.ipl) post('iplVisit', { export: it.export, style: styleOf(it.export) }); return;
+      case 'iplPreset': {
+        if (!it || !it.ipl) return;
+        const st = styleOf(it.export); st.preset = el.dataset.v;
+        post('iplStyle', { export: it.export, style: st }); select(S.sel, true, true); return;
+      }
+      case 'iplOpt': {
+        if (!it || !it.ipl) return;
+        const st = styleOf(it.export), g = el.dataset.g, o = el.dataset.o;
+        st.on = obj(st.on); st.choice = obj(st.choice);
+        if (el.dataset.k === 'many') { st.on[g] = obj(st.on[g]); if (st.on[g][o]) delete st.on[g][o]; else st.on[g][o] = true; }
+        else if (o) st.choice[g] = o; else delete st.choice[g];
+        post('iplStyle', { export: it.export, style: st }); select(S.sel, true, true); return;
+      }
+      case 'restyle': {
+        if (!it || it.kind !== 'ipl') return;
+        S.styling = { name: it.name, label: it.label, export: it.ipl };
+        const base = JSON.parse(JSON.stringify(it.style || {}));
+        const on = obj(base.on); Object.keys(on).forEach((g) => { on[g] = obj(on[g]); });
+        S.iplStyle[it.ipl] = { preset: base.preset || 'default', choice: obj(base.choice), on };
+        S.shellSrc = 'ipls'; q.value = ''; S.chip.ipls = 'all';
+        setTab('shells');
+        setTimeout(() => { const i = S.items.findIndex((x) => x.export === it.ipl); if (i >= 0) select(i, true); }, 60);
+        return;
+      }
+      case 'saveStyle': {
+        if (!S.styling) return;
+        const st = styleOf(S.styling.export);
+        post('roomStyle', { name: S.styling.name, style: st }).then((r) => { if (result(r, 'Style saved. Everyone inside sees it now.')) { S.styling = null; render(true); } });
+        return;
+      }
+      case 'stylingCancel': S.styling = null; render(true); return;
       case 'booth': {
         let list = boothList();
         const first = Object.keys(S.thumbs).length === 0;
@@ -461,6 +537,8 @@
     const tbtn = e.target.closest('.mode'); if (tbtn) { setTab(tbtn.dataset.t); return; }
     const c = e.target.closest('.chip'); if (c && chips.contains(c)) {
       if (c.dataset.s) { setSrc(c.dataset.s); return; }
+      if (c.dataset.ss) { S.shellSrc = c.dataset.ss; if (S.shellSrc === 'ipls') post('previewStop'); S.pv = null; render(false); return; }
+      if (S.tab === 'shells' && S.shellSrc === 'ipls') { S.chip.ipls = c.dataset.c; render(false); return; }
       S.chip[S.tab === 'place' && S.src !== 'housing' ? 'lib' : S.tab] = c.dataset.c; render(false); return;
     }
     const r = e.target.closest('.row'); if (r && list.contains(r) && !e.target.closest('.det')) { const i = +r.dataset.i; select(i, i === S.sel ? !S.open : true); }
@@ -478,7 +556,7 @@
     const t = S.tab;
     if (t === 'rooms') return act('decorate');
     if (t === 'place') return act(S.src === 'pieces' ? 'pieceMove' : 'place');
-    if (t === 'shells') return act('walk');
+    if (t === 'shells') return act(S.items[S.sel] && S.items[S.sel].ipl ? 'iplGo' : 'walk');
     if (t === 'spots') { const it = S.items[S.sel]; if (it) copy(`vector4(${f2(it.x)}, ${f2(it.y)}, ${f2(it.z)}, ${Number(it.h || 0).toFixed(1)})`); return; }
     if (t === 'history') return select(S.sel, true);
     if (t === 'inspect') return act('copyName');
@@ -586,6 +664,7 @@
         if (m.pick !== undefined) S.pick = m.pick || null;
         S.pv = m.previewing || null;
         loadThumbs();
+        if (!S.ipls) post('ipls').then((r) => { S.ipls = Array.isArray(r) ? r : []; if (S.shown && (S.tab === 'shells' || S.tab === 'rooms')) render(true); });
         S.src = store('dps-studio-src', 'decorate'); if (!['decorate', 'build', 'housing'].includes(S.src)) S.src = 'decorate';
         if (!S.lib) fetch('library.json').then((r) => r.json()).then((d) => {
           if (!d || !Array.isArray(d.groups)) throw new Error('bad');

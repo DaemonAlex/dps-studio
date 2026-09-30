@@ -9,9 +9,18 @@ local RES = GetCurrentResourceName()
 local rooms = {}           -- name -> room (see Studio.NewRoom)
 local ready = false
 local shells, shellSet = {}, {}
+local iplSet = {}
+for _, e in ipairs(StudioIpls or {}) do iplSet[e.export] = true end
 local furnCats, furnModels
 
 local function allowed(src) return src and IsPlayerAceAllowed(src, ACE) end
+
+---The room already using an interior, other than `except` (each interior serves one room).
+local function iplOwner(ipl, except)
+    for n, r in pairs(rooms) do
+        if n ~= except and r.kind == 'ipl' and r.ipl == ipl then return r end
+    end
+end
 local function who(src) return (GetPlayerName(src) or ('id ' .. tostring(src))):sub(1, 60) end
 
 -- ---------------------------------------------------------------- data sources
@@ -274,6 +283,28 @@ lib.callback.register('dps-studio:roomCreate', function(src, d)
     local name, label = Studio.CleanName(d.name), Studio.CleanLabel(d.label)
     if not name then return false, 'Name: letters, numbers, - or _ only, up to 32' end
     if not label then return false, 'The door words must be 1 to 40 letters' end
+    if d.kind == 'ipl' then
+        -- an interior (IPL) room: the way out is a spot inside the interior, in world terms
+        if type(d.ipl) ~= 'string' or not iplSet[d.ipl] then return false, 'That interior is not in the list' end
+        if not Studio.ValidSpot(d.entrance) then return false, 'Bad door spot' end
+        if not Studio.ValidSpot(d.exit) then return false, 'Bad way out' end
+        if rooms[name] and d.redo ~= true then return false, 'That name is taken. Pick another, or use Change shell or way out on that room.' end
+        if not rooms[name] and d.redo == true then return false, 'That room is gone' end
+        local owner = iplOwner(d.ipl, name)
+        if owner then return false, ('That interior already belongs to %s. Each interior serves one room.'):format(owner.label) end
+        local iplLabel = d.ipl
+        for _, e in ipairs(StudioIpls) do if e.export == d.ipl then iplLabel = e.label end end
+        return change(src, name, rooms[name] and 'rebuild' or 'create', ('Made room %s in %s'):format(label, iplLabel), function()
+            local old = rooms[name]
+            local room = Studio.NewIplRoom(name, label, d.ipl, d.entrance, d.exit, d.style)
+            if old and old.kind == 'ipl' and old.ipl == d.ipl then   -- same interior: every look survives
+                room.looks, room.look, room.nextLook = old.looks, old.look, old.nextLook
+                Studio.ActiveLook(room).style = Studio.CleanStyle(d.style)
+            end
+            rooms[name] = room
+            return true
+        end)
+    end
     if not shellSet[d.shell] then return false, 'That shell is not in the housing list' end
     if not Studio.ValidSpot(d.entrance) then return false, 'Bad door spot' end
     if not Studio.ValidOffset(d.exit) then return false, 'The way out must be inside the shell' end
@@ -327,6 +358,7 @@ lib.callback.register('dps-studio:roomCopy', function(src, name, newName, label,
     if not from then return false, 'No room with that name' end
     if not newName then return false, 'Name: letters, numbers, - or _ only, up to 32' end
     if rooms[newName] then return false, 'That name is taken' end
+    if from.kind == 'ipl' then return false, 'An interior serves one room, so interior rooms cannot be copied. Make a new room with another interior.' end
     if not label then return false, 'The door words must be 1 to 40 letters' end
     if not Studio.ValidSpot(spot) then return false, 'Bad door spot' end
     return change(src, newName, 'copy', ('Copied %s to %s'):format(from.label, label), function()
@@ -399,6 +431,17 @@ lib.callback.register('dps-studio:lookDelete', function(src, name, id)
     end)
 end)
 
+lib.callback.register('dps-studio:lookStyle', function(src, name, style)
+    if not allowed(src) then return false, 'Studio is for admins' end
+    local room = rooms[name]
+    if not room or room.kind ~= 'ipl' then return false, 'No interior room with that name' end
+    local look = Studio.ActiveLook(room)
+    return change(src, name, 'style', ('New style for %s / %s'):format(room.label, look.name), function()
+        look.style = Studio.CleanStyle(style)
+        return true
+    end)
+end)
+
 -- ---------------------------------------------------------------- admin: pieces
 local LOOK_CHANGED = 'Someone switched this room to another look. Open the panel and try again.'
 
@@ -445,9 +488,13 @@ lib.callback.register('dps-studio:restore', function(src, id)
         if not ok or type(r) ~= 'table' then return false, 'That snapshot cannot be read' end
         if #shells == 0 then loadShells() end
         local _, models = furniture()
-        local clean, err = Studio.CleanRoom(r, shellSet, next(models) and models or nil)
+        local clean, err = Studio.CleanRoom(r, shellSet, next(models) and models or nil, iplSet)
         if not clean then return false, 'That snapshot cannot be used: ' .. err end
         if clean.name ~= row.room then return false, 'That snapshot belongs to another room' end
+        if clean.kind == 'ipl' then
+            local owner = iplOwner(clean.ipl, row.room)
+            if owner then return false, ('That interior now belongs to %s. Each interior serves one room.'):format(owner.label) end
+        end
         before = clean
     end
     return change(src, row.room, 'restore', ('Restored %s to before: %s'):format(row.room, row.summary or ''), function()

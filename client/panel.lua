@@ -115,8 +115,65 @@ end
 ---Leaves the panel for another screen: a preview that is still showing ends first.
 local function leave()
     if pv.on and not pv.walking then previewStop() end
+    if StudioC.IplVisiting and StudioC.IplVisiting() then StudioC.IplLeave(nil, true) end   -- the next move places the player
     pick = nil
     hide()
+end
+
+-- ---------------------------------------------------------------- walking an interior (IPL)
+local iplWalking = false
+local function iplWalk()
+    if iplWalking then return end
+    iplWalking = true
+    hide()
+    StudioC.SetBusy(true)
+    local list = { { 'Walk', 'look around' }, { 'Enter', 'back to the panel, try styles' } }
+    if pick then list[#list + 1] = { 'G', 'the way out of ' .. pick.label .. ' is here' } end
+    list[#list + 1] = { 'Backspace', 'leave the interior' }
+    nui({ action = 'keys', title = 'Interior', keys = list })
+    CreateThread(function()
+        local calm = GetGameTimer() + 300
+        while iplWalking do
+            DisableControlAction(0, 191, true); DisableControlAction(0, 194, true); DisableControlAction(0, 177, true)
+            DisableControlAction(0, 47, true); DisableControlAction(0, 199, true); DisableControlAction(0, 200, true)
+            if not StudioC.IplVisiting() then
+                iplWalking = false
+            elseif GetGameTimer() < calm then
+                -- wait out the key that started this
+            elseif IsDisabledControlJustPressed(0, 191) then
+                iplWalking = false
+                nui({ action = 'keys' })
+                StudioC.SetBusy(false)
+                show('shells')
+            elseif pick and IsDisabledControlJustPressed(0, 47) then
+                local ped = cache.ped
+                local p = GetEntityCoords(ped)
+                local export = StudioC.IplVisiting()
+                local d = { kind = 'ipl', ipl = export, style = StudioC.IplVisitStyle and StudioC.IplVisitStyle() or nil,
+                            name = pick.name, label = pick.label, entrance = pick.entrance, redo = pick.redo == true,
+                            exit = { x = p.x, y = p.y, z = p.z, h = GetEntityHeading(ped) } }
+                local ok, err = lib.callback.await('dps-studio:roomCreate', false, d)
+                if ok then
+                    iplWalking = false
+                    nui({ action = 'keys' })
+                    local e = pick.entrance
+                    pick = nil
+                    StudioC.IplLeave(vec4(e.x, e.y, e.z, e.h))
+                    StudioC.SetBusy(false)
+                    notify(true, ('%s is ready. Press E at the door to try it.'):format(d.label))
+                else
+                    notify(false, err or 'Not saved')
+                end
+            elseif IsDisabledControlJustPressed(0, 194) or IsDisabledControlJustPressed(0, 177) or IsDisabledControlJustPressed(0, 200) then
+                iplWalking = false
+                nui({ action = 'keys' })
+                StudioC.IplLeave()
+                StudioC.SetBusy(false)
+                show('shells')
+            end
+            Wait(0)
+        end
+    end)
 end
 
 local function previewShell(model)
@@ -241,7 +298,12 @@ RegisterCommand('admin', function()
         return lib.notify({ type = 'inform', description = 'Finish placing or walking first (Backspace leaves).' })
     end
     print(('[dps-studio] /admin %s'):format(open and 'closing' or 'opening'))
-    if open then hide() else show() end
+    if open then
+        if StudioC.IplVisiting() then CreateThread(function() StudioC.IplLeave() end) end
+        hide()
+    else
+        show()
+    end
 end, false)
 
 TriggerEvent('chat:addSuggestion', '/admin', 'DPS Studio: rooms, furniture, shells, spots and doors (admin)')
@@ -286,6 +348,7 @@ end)
 
 RegisterNUICallback('close', function(_, cb)
     if pv.on then previewStop() end
+    if StudioC.IplVisiting() then CreateThread(function() StudioC.IplLeave() end) end
     pick = nil
     hide()
     cb({ ok = true })
@@ -391,6 +454,27 @@ local function unlight()
     lit = nil
 end
 StudioC.Unlight = unlight
+
+RegisterNUICallback('ipls', function(_, cb) cb(StudioC.IplCatalogue()) end)
+
+RegisterNUICallback('iplVisit', function(d, cb)
+    if type(d.export) ~= 'string' then return cb({ ok = false }) end
+    if pv.on then previewStop() end
+    cb({ ok = true })
+    CreateThread(function()
+        hide()
+        local ok, err = StudioC.IplVisit(d.export, d.style)
+        if not ok then notify(false, err); return show('shells') end
+        iplWalk()
+    end)
+end)
+
+RegisterNUICallback('iplStyle', function(d, cb)
+    if type(d.export) == 'string' then StudioC.IplRestyle(d.export, d.style) end
+    cb({ ok = true })
+end)
+
+RegisterNUICallback('roomStyle', function(d, cb) cb(call('dps-studio:lookStyle', d.name, d.style)) end)
 
 RegisterNUICallback('thumbs', function(_, cb) cb(lib.callback.await('dps-studio:thumbs', false) or {}) end)
 

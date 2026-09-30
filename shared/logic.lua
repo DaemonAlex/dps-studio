@@ -126,10 +126,51 @@ function Studio.ValidPiece(p, models)
     return true
 end
 
+---An interior style: which bob74 look an interior room shows.
+---preset: 'default' (bob74's own), 'full' (everything on), 'empty' (all extras off), 'custom'.
+---choice[group] = option key (one per group); on[group][option] = true (toggle groups).
+local PRESETS = { default = true, full = true, empty = true, custom = true }
+local function word(v) return type(v) == 'string' and #v > 0 and #v <= 48 and not v:find('[%c<>]') end
+function Studio.CleanStyle(st)
+    if type(st) ~= 'table' then return { preset = 'default' } end
+    local out = { preset = PRESETS[st.preset] and st.preset or 'default', choice = {}, on = {} }
+    local n = 0
+    for g, o in pairs(type(st.choice) == 'table' and st.choice or {}) do
+        n = n + 1
+        if n > 40 then break end
+        if word(g) and word(o) then out.choice[g] = o end
+    end
+    n = 0
+    for g, set in pairs(type(st.on) == 'table' and st.on or {}) do
+        n = n + 1
+        if n > 40 then break end
+        if word(g) and type(set) == 'table' then
+            local t, m = {}, 0
+            for k, v in pairs(set) do
+                m = m + 1
+                if m > 60 then break end
+                if word(k) and v == true then t[k] = true end
+            end
+            out.on[g] = t
+        end
+    end
+    return out
+end
+
+local function copyStyle(st) return st and Studio.CleanStyle(st) or nil end
+
 local function copyPieces(list)
     local out = {}
     for i, q in ipairs(list or {}) do out[i] = { id = q.id, model = q.model, x = q.x, y = q.y, z = q.z, h = q.h } end
     return out
+end
+
+---A fresh interior (IPL) room: the way out is a spot inside the interior in world terms.
+function Studio.NewIplRoom(name, label, ipl, entrance, exit, style)
+    local room = Studio.NewRoom(name, label, nil, entrance, exit)
+    room.kind, room.ipl = 'ipl', ipl
+    room.looks[1].style = Studio.CleanStyle(style)
+    return room
 end
 
 ---A fresh room with one empty look called Default.
@@ -158,7 +199,8 @@ function Studio.AddLook(room, name, copyFrom)
         if l.name:lower() == name:lower() then return nil, 'That look name is taken' end
     end
     local src = copyFrom and Studio.FindLook(room, copyFrom)
-    local look = { id = room.nextLook, name = name, pieces = src and copyPieces(src.pieces) or {}, nextPiece = src and src.nextPiece or 1 }
+    local look = { id = room.nextLook, name = name, pieces = src and copyPieces(src.pieces) or {}, nextPiece = src and src.nextPiece or 1,
+                   style = src and copyStyle(src.style) or (room.kind == 'ipl' and { preset = 'default' } or nil) }
     room.nextLook = room.nextLook + 1
     room.looks[#room.looks + 1] = look
     return look
@@ -199,8 +241,9 @@ end
 ---What every player needs to run a room: door, way out, shell and the active look's pieces.
 function Studio.PublicRoom(room)
     local look = Studio.ActiveLook(room)
-    return { name = room.name, label = room.label, shell = room.shell, entrance = room.entrance, exit = room.exit,
-             look = look and look.id or nil, pieces = look and copyPieces(look.pieces) or {} }
+    return { name = room.name, label = room.label, shell = room.shell, kind = room.kind or 'shell', ipl = room.ipl,
+             entrance = room.entrance, exit = room.exit, look = look and look.id or nil,
+             style = look and copyStyle(look.style) or nil, pieces = look and copyPieces(look.pieces) or {} }
 end
 
 ---What the admin panel lists for a room.
@@ -208,7 +251,8 @@ function Studio.RoomSummary(room)
     local looks = {}
     for i, l in ipairs(room.looks) do looks[i] = { id = l.id, name = l.name, count = #l.pieces } end
     local active = Studio.ActiveLook(room)
-    return { name = room.name, label = room.label, shell = room.shell, entrance = room.entrance, exit = room.exit,
+    return { name = room.name, label = room.label, shell = room.shell, kind = room.kind or 'shell', ipl = room.ipl,
+             style = active and copyStyle(active.style) or nil, entrance = room.entrance, exit = room.exit,
              look = room.look, lookName = active and active.name or '', count = active and #active.pieces or 0,
              max = Studio.MAX_PIECES, looks = looks, updatedBy = room.updatedBy, updatedAt = room.updatedAt }
 end
@@ -217,11 +261,18 @@ end
 ---Refuses a room whose shell or spots are wrong; drops pieces not in the catalogue.
 ---models may be nil when the catalogue is not loaded: then pieces are kept as they are.
 ---@return table|nil room, string|nil err, integer dropped
-function Studio.CleanRoom(room, shellSet, models)
+function Studio.CleanRoom(room, shellSet, models, iplSet)
     if type(room) ~= 'table' then return nil, 'Unreadable room', 0 end
-    if type(room.shell) ~= 'string' or not shellSet[room.shell] then return nil, 'Its shell is not in the housing list', 0 end
+    if room.kind == 'ipl' then
+        if type(room.ipl) ~= 'string' or not (iplSet or {})[room.ipl] then return nil, 'Its interior is not in the list', 0 end
+        if not Studio.ValidSpot(room.exit) then return nil, 'Bad way out', 0 end
+    else
+        room.kind = nil
+        if type(room.shell) ~= 'string' or not shellSet[room.shell] then return nil, 'Its shell is not in the housing list', 0 end
+        if not Studio.ValidOffset(room.exit) then return nil, 'Bad way out', 0 end
+    end
     if not Studio.CleanName(room.name) or type(room.label) ~= 'string' then return nil, 'Bad name', 0 end
-    if not Studio.ValidSpot(room.entrance) or not Studio.ValidOffset(room.exit) then return nil, 'Bad door or way out', 0 end
+    if not Studio.ValidSpot(room.entrance) then return nil, 'Bad door', 0 end
     if type(room.looks) ~= 'table' or #room.looks == 0 then return nil, 'No looks', 0 end
     local dropped = 0
     for _, l in ipairs(room.looks) do
@@ -236,6 +287,7 @@ function Studio.CleanRoom(room, shellSet, models)
         end
         l.pieces = keep
         l.nextPiece = math.max(tonumber(l.nextPiece) or 1, top + 1)
+        l.style = room.kind == 'ipl' and Studio.CleanStyle(l.style) or nil
     end
     if not Studio.FindLook(room, room.look) then room.look = room.looks[1].id end
     return room, nil, dropped

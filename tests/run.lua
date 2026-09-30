@@ -4,6 +4,7 @@ local function vec(...) return { ... } end
 vec3, vec4, vector3, vector4 = vec3 or vec, vec4 or vec, vector3 or vec, vector4 or vec
 dofile('shared/logic.lua')
 dofile('shared/shellmeta.lua')
+dofile('shared/ipls.lua')
 
 local fails, n = 0, 0
 local function check(name, ok) n = n + 1; print((ok and 'PASS ' or 'FAIL ') .. name); if not ok then fails = fails + 1 end end
@@ -104,6 +105,22 @@ local slow = 'local i = 0 while true do i = i + 1 end'
 check('furniture: endless file is stopped', #Studio.ParseFurniture(slow, '') == 0)
 check('furniture: file cannot change the string library', #Studio.ParseFurniture("string.format = nil Config.Furniture = {}", '') == 0 and string.format ~= nil)
 
+-- interior (IPL) rooms and styles
+local ist = Studio.CleanStyle({ preset = 'custom', choice = { Walls = 'plain', ['<b>'] = 'x', Big = string.rep('a', 60) }, on = { Details = { chairs = true, bad = 'yes' } } })
+check('style: keeps good choices, drops bad ones', ist.preset == 'custom' and ist.choice.Walls == 'plain' and ist.choice['<b>'] == nil and ist.choice.Big == nil and ist.on.Details.chairs and ist.on.Details.bad == nil)
+check('style: unknown preset becomes default', Studio.CleanStyle({ preset = 'rainbow' }).preset == 'default' and Studio.CleanStyle(nil).preset == 'default')
+local iroom = Studio.NewIplRoom('club', 'Club', 'GetBikerClubhouse1Object', { x = 1, y = 2, z = 3, h = 0 }, { x = 1107, y = -3157, z = -37.5, h = 90 }, { preset = 'full' })
+check('ipl room: kind, interior and style on the first look', iroom.kind == 'ipl' and iroom.ipl == 'GetBikerClubhouse1Object' and iroom.looks[1].style.preset == 'full')
+local ipub = Studio.PublicRoom(iroom)
+check('ipl room: public data carries kind, interior and style', ipub.kind == 'ipl' and ipub.ipl == 'GetBikerClubhouse1Object' and ipub.style.preset == 'full')
+local il2 = Studio.AddLook(iroom, 'Night', iroom.look)
+check('ipl room: a copied look copies the style', il2.style.preset == 'full')
+local il3 = Studio.AddLook(iroom, 'Bare')
+check('ipl room: a new empty look starts on the default style', il3.style.preset == 'default')
+check('ipl room: clean passes with the interior in the list', Studio.CleanRoom(Studio.Copy(iroom), {}, nil, { GetBikerClubhouse1Object = true }) ~= nil)
+check('ipl room: clean refuses an unknown interior', Studio.CleanRoom(Studio.Copy(iroom), {}, nil, {}) == nil)
+check('shell room: public data says shell', Studio.PublicRoom(room).kind == 'shell')
+
 -- old files
 local s = Studio.ParseSpotLine('210 | 2026-09-30 07:21:11 | Schtoop | greenroom | vec3(690.36, 588.38, 131.06) | heading 343.8 | no prop within 6m | Marlowe Dr | Vinewood Hills')
 check('spot line: parsed', s and s.label == 'greenroom' and s.x == 690.36 and s.h == 343.8 and s.street == 'Marlowe Dr' and s.zone == 'Vinewood Hills' and s.propHash == nil)
@@ -129,5 +146,8 @@ if arg[2] then
     check('live furniture: some', k > 0)
 end
 
+local iseen, idup = {}, false
+for _, e in ipairs(StudioIpls) do if iseen[e.export] then idup = true end; iseen[e.export] = true end
+check('interior list: filled, no duplicates', #StudioIpls > 50 and not idup)
 print(('%d checks, %s'):format(n, fails == 0 and 'ALL PASS' or (fails .. ' FAILED')))
 os.exit(fails == 0 and 0 or 1)
