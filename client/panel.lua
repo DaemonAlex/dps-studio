@@ -158,7 +158,7 @@ local function walk()
     if not pv.obj then return notify(false, 'Pick a shell that loads first') end
     hide()
     pv.walking = true
-    StudioC.busy = true
+    StudioC.SetBusy(true)
     local ped = cache.ped
     RenderScriptCams(false, false, 0, true, true)
     local p = floorPoint()
@@ -181,7 +181,7 @@ local function walk()
                 RenderScriptCams(true, false, 0, true, true)
                 placeCam()
                 nui({ action = 'keys' })
-                StudioC.busy = false
+                StudioC.SetBusy(false)
                 show('shells')
             elseif pick and IsDisabledControlJustPressed(0, 47) then -- G: the way out is here
                 local ped2 = cache.ped
@@ -191,7 +191,7 @@ local function walk()
                 local ok, err = lib.callback.await('dps-studio:roomCreate', false, d)
                 if ok then
                     pv.walking = false
-                    StudioC.busy = false
+                    StudioC.SetBusy(false)
                     local e = pick.entrance
                     pick = nil
                     previewStop({ x = e.x, y = e.y, z = e.z, h = e.h })
@@ -201,7 +201,7 @@ local function walk()
                 end
             elseif IsDisabledControlJustPressed(0, 194) or IsDisabledControlJustPressed(0, 177) or IsDisabledControlJustPressed(0, 200) then -- Backspace / Esc: leave
                 pv.walking = false
-                StudioC.busy = false
+                StudioC.SetBusy(false)
                 previewStop()
                 show('rooms')
             else

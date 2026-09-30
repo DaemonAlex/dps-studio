@@ -45,7 +45,7 @@ function StudioC.Place(roomName, model, id, heading, movingEnt)
     if not IsModelInCdimage(hash) or not pcall(lib.requestModel, hash, 15000) then
         return lib.notify({ type = 'error', description = model .. ' did not load' })
     end
-    StudioC.busy = true
+    StudioC.SetBusy(true)
     if movingEnt then SetEntityVisible(movingEnt, false, false); SetEntityCollision(movingEnt, false, false) end
     local ghost = CreateObjectNoOffset(hash, room.shellPos.x, room.shellPos.y, room.shellPos.z, false, false, false)
     SetEntityCollision(ghost, false, false)
@@ -139,12 +139,12 @@ function StudioC.Place(roomName, model, id, heading, movingEnt)
     end
     DeleteEntity(ghost)
     hideKeys()
-    StudioC.busy = false
+    StudioC.SetBusy(false)
 end
 
 ---Look at a placed piece: E moves it, Delete removes it, Backspace ends.
 function StudioC.Edit(roomName)
-    StudioC.busy = true
+    StudioC.SetBusy(true)
     keys('Move or remove', { { 'Look', 'at a piece' }, { 'E', 'move it' }, { 'Delete', 'remove it' }, { 'Backspace', 'done' } })
     local last
     local function outline(e, on) if e and DoesEntityExist(e) then SetEntityDrawOutline(e, on) end end
@@ -159,7 +159,7 @@ function StudioC.Edit(roomName)
         if target and pressed(K.e) then
             outline(target, false)
             hideKeys()
-            StudioC.busy = false
+            StudioC.SetBusy(false)
             return StudioC.Place(roomName, info.model, info.id, GetEntityHeading(target), target)
         elseif target and pressed(K.del) then
             local r = StudioC.rooms[roomName]
@@ -173,5 +173,5 @@ function StudioC.Edit(roomName)
     end
     outline(last, false)
     hideKeys()
-    StudioC.busy = false
+    StudioC.SetBusy(false)
 end

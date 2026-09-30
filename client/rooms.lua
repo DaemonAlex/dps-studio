@@ -26,6 +26,21 @@ end
 
 local function nui(msg) SendNUIMessage(msg) end
 
+---Busy while placing, fine tuning or walking a shell. The inventory is held shut through its
+---own busy flag, so Tab (fine tune) never opens it; the flag goes back to what it was after.
+function StudioC.SetBusy(on)
+    on = on and true or false
+    if on == (StudioC.busy or false) then return end
+    StudioC.busy = on
+    if on then
+        StudioC._invPrev = LocalPlayer.state.invBusy
+        LocalPlayer.state:set('invBusy', true, false)
+    else
+        LocalPlayer.state:set('invBusy', StudioC._invPrev or false, false)
+        StudioC._invPrev = nil
+    end
+end
+
 local function spawn(model, pos, h)
     local hash = joaat(model)
     if not IsModelInCdimage(hash) or not pcall(lib.requestModel, hash, 15000) then return end
@@ -262,6 +277,7 @@ end)
 
 AddEventHandler('onResourceStop', function(res)
     if res ~= GetCurrentResourceName() then return end
+    StudioC.SetBusy(false)
     -- anyone inside a room goes back to its door before the room disappears
     local here = StudioC.RoomHere()
     local r = here and StudioC.rooms[here]
