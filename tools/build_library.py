@@ -10,7 +10,7 @@ The game client later drops any name it cannot spawn, so a stale entry never sho
 import json, os, re, sys, collections
 
 THEMES = [  # (key, label, words) first match wins; words are matched inside the model name
-    ('lighting', 'Lighting', ['chandel', 'lamp', 'light', 'lantern', 'candle', 'neon', 'bulb', 'sconce', 'spotl', 'floodl', 'torch', 'fairyl', 'strobe', 'led_', 'glow']),
+    ('lighting', 'Lighting', ['chandel', 'lamp', 'light', 'pendant', 'ceiling', 'lantern', 'candle', 'neon', 'bulb', 'sconce', 'spotl', 'floodl', 'torch', 'fairyl', 'strobe', 'led_', 'glow']),
     ('seating', 'Seating', ['sofa', 'couch', 'chair', 'stool', 'seat', 'bench', 'armch', 'recliner', 'ottoman', 'pouf', 'beanbag']),
     ('tables', 'Tables and desks', ['table', 'desk', 'counter', 'podium', 'lectern']),
     ('beds', 'Beds', ['bed', 'mattress', 'bunk', 'cot_', 'crib']),
@@ -47,6 +47,24 @@ def theme_of(name):
                     return key
     return None
 
+# Decorate = pieces for dressing a room. Build = pieces for building the world (barriers,
+# crates, signs, trees, industry, map parts). Studio's Place tab opens on Decorate.
+DECOR_THEMES = {'lighting', 'seating', 'tables', 'beds', 'storage', 'kitchen', 'bathroom', 'bar', 'electronics', 'office', 'decor', 'plants', 'gym'}
+INTERIOR_SETS = re.compile(r'^(apa_mp_h_|apa_prop_|ex_mp_h_|ex_prop_|ex_office|bkr_prop_clubhouse|bkr_prop_biker_(ceiling|pendant|chair|bar|table|sofa|lamp|jukebox|pool|dart|tv|laptop)|imp_prop_impexp_(sofa|table|chair|coffee|lamp|tv|desk|shelf|rack|art|plant)|sf_mp_h_|sf_prop_sf_|ch_prop_ch_|vw_prop_|h4_prop_h4_|xm3_prop_|m2[345]_\d_prop_|v_res_|v_ret_|v_club_|v_corp_|v_med_|v_ilev_|hei_heist_|hei_prop_hei_|ba_prop_|gr_prop_gr_|tr_prop_|reh_prop_|sum_prop_|prop_)')
+NOT_DECOR = re.compile(r'(mesh|wall|floor|shell|detail|frame|window|door|stair|pipe|cable|wire|beam|pillar|shadow|roof|plinth|debris|rubble|trim|skirting|decal|'
+                       r'truck|carrier|dock|race|runway|street|traffic|road|flood|construct|work_|mine|farm|military|heli|plane|boat|ship|snow|target|'
+                       r'trolly|trolley|pallet|skip|dumpster|barrier|cone|fence|tree|bush|grass|hedge|weed_|crate|drum|barrel|tyre|tire|engine|'
+                       r'_cr$|_ld_|_cs_|prologue|test|dummy|proxy|rail|redlight|phonebox|police|flag_|arena|acid|abattoir|ballistic|inflate|trailr|trailer)')
+
+def use_of(n, src, theme):
+    if theme not in DECOR_THEMES:
+        return 'build'
+    if NOT_DECOR.search(n):
+        return 'build'
+    if src == 'Game':
+        return 'decorate' if INTERIOR_SETS.match(n) else 'build'
+    return 'decorate' if 'prop' in src.lower() else 'build'
+
 def main(objlist, ydrlist, out, root='/opt/fivem/server-data/resources/'):
     items = {}   # model -> (source, is_map)
     for l in open(objlist, encoding='utf-8', errors='ignore'):
@@ -74,14 +92,19 @@ def main(objlist, ydrlist, out, root='/opt/fivem/server-data/resources/'):
     for n in sorted(items):
         src, is_map = items[n]
         t = theme_of(n)
+        if t == 'lighting' and src != 'Game' and 'prop' not in src.lower():
+            # light parts cut from a map's interior only switch on inside their own room;
+            # placed loose they flicker as the camera turns, so they are not offered as lamps
+            t = 'mappieces'
         if t is None:
             t = 'mappieces' if is_map else 'other'
-        groups[t]['items'].append([n, src])
+        groups[t]['items'].append([n, src, 'd' if use_of(n, src, t) == 'decorate' else 'b'])
     data = {'groups': [g for g in groups.values() if g['items']], 'count': len(items)}
     with open(out, 'w') as f:
         json.dump(data, f, separators=(',', ':'))
     for g in data['groups']:
-        print(f"{g['label']:<22} {len(g['items'])}")
+        d = sum(1 for i in g['items'] if i[2] == 'd')
+        print(f"{g['label']:<22} decorate {d:<6} build {len(g['items']) - d}")
     print('total', len(items), 'bytes', os.path.getsize(out))
 
 if __name__ == '__main__':

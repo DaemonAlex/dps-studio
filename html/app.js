@@ -23,7 +23,7 @@
 
   const S = { tab: 'rooms', boot: null, rooms: [], spots: [], hist: [], scans: [], here: null, pick: null,
               items: [], sel: -1, open: false, chip: { place: 'all', lib: 'lighting', shells: 'all', spots: 'all' }, q: {}, shellTimer: null, shown: false, pv: null,
-              src: 'lib', lib: null, bad: new Set(), more: 0 };
+              src: 'decorate', lib: null, bad: new Set(), more: 0 };
   const LIB_ICON = { lighting: 'fa-lightbulb', seating: 'fa-couch', tables: 'fa-table', beds: 'fa-bed', storage: 'fa-box-archive', kitchen: 'fa-kitchen-set',
     bathroom: 'fa-bath', bar: 'fa-martini-glass', electronics: 'fa-tv', office: 'fa-briefcase', decor: 'fa-image', plants: 'fa-seedling', gym: 'fa-dumbbell',
     crime: 'fa-screwdriver-wrench', street: 'fa-road-barrier', other: 'fa-cube', mappieces: 'fa-puzzle-piece' };
@@ -97,14 +97,14 @@
       case 'place': {
         const out = [];
         S.more = 0;
-        if (S.src === 'lib') {
+        if (S.src === 'decorate' || S.src === 'build') {
           if (!S.lib) return out;
           const words = words_(q.value);
           const searching = words.length > 0;
           for (const g of S.lib.groups) {
             if (!searching && S.chip.lib !== 'all' && S.chip.lib !== g.key) continue;
             for (const it of g.items) {
-              if (S.bad.has(it.m)) continue;
+              if (it.use !== S.src || S.bad.has(it.m)) continue;
               if (searching && !words.every((w) => it.hay.includes(w))) continue;
               if (out.length >= LIB_CAP) { S.more++; continue; }
               out.push({ object: it.m, label: it.label, cat: g.label, gkey: g.key, src: it.src, lib: true });
@@ -221,8 +221,8 @@
 
     let c = '';
     if (t === 'place' && S.here) {
-      const srcs = `<button class="chip src${S.src === 'lib' ? ' on' : ''}" data-s="lib"><i class="fa-solid fa-layer-group"></i> Full library${S.lib ? ' · ' + (S.lib.count - S.bad.size).toLocaleString('en-US') : ''}</button><button class="chip src${S.src === 'housing' ? ' on' : ''}" data-s="housing"><i class="fa-solid fa-image"></i> Housing furniture, with pictures</button><span class="brk"></span>`;
-      if (S.src === 'lib' && S.lib) c = srcs + [['all', 'All']].concat(S.lib.groups.map((g) => [g.key, g.label])).map(([k, l]) => `<button class="chip${S.chip.lib === k && !q.value.trim() ? ' on' : ''}" data-c="${esc(k)}">${esc(l)}</button>`).join('') + (q.value.trim() ? '<span class="brk"></span><span class="hint2">Searching every group</span>' : '');
+      const srcs = `<button class="chip src${S.src === 'decorate' ? ' on' : ''}" data-s="decorate"><i class="fa-solid fa-couch"></i> Decorate</button><button class="chip src${S.src === 'build' ? ' on' : ''}" data-s="build"><i class="fa-solid fa-trowel-bricks"></i> Build</button><button class="chip src${S.src === 'housing' ? ' on' : ''}" data-s="housing"><i class="fa-solid fa-image"></i> Housing furniture, with pictures</button><span class="brk"></span>`;
+      if ((S.src === 'decorate' || S.src === 'build') && S.lib) c = srcs + [['all', 'All']].concat(S.lib.groups.filter((g) => g.n[S.src] > 0).map((g) => [g.key, g.label])).map(([k, l]) => `<button class="chip${S.chip.lib === k && !q.value.trim() ? ' on' : ''}" data-c="${esc(k)}">${esc(l)}</button>`).join('') + (q.value.trim() ? '<span class="brk"></span><span class="hint2">Searching every group</span>' : '');
       else if (S.boot) c = srcs + [['all', 'All']].concat(S.boot.furniture.map((f) => [f.key, f.label])).map(([k, l]) => `<button class="chip${S.chip.place === k ? ' on' : ''}" data-c="${esc(k)}">${esc(l)}</button>`).join('');
       else c = srcs;
     }
@@ -241,7 +241,7 @@
     q.disabled = t === 'doors'; q.placeholder = PH[t] || '';
     stage.hidden = !(t === 'shells' && S.shown);
     if (t === 'doors') { list.innerHTML = doorsDoc(); S.items = []; $('#cnt').textContent = ''; return; }
-    if (t === 'place' && S.here && S.src === 'lib' && !S.lib) { renderHead(); list.innerHTML = '<div class="empty"><b>Loading the library…</b></div>'; S.items = []; return; }
+    if (t === 'place' && S.here && S.src !== 'housing' && !S.lib) { renderHead(); list.innerHTML = '<div class="empty"><b>Loading the library…</b></div>'; S.items = []; return; }
     if (t === 'place' && !S.here) { list.innerHTML = placeEmpty(); S.items = []; $('#cnt').textContent = ''; return; }
     S.items = itemsFor(t);
     list.innerHTML = S.items.length ? S.items.map((it, i) => rowHtml(t, it, i)).join('') + (S.more ? `<div class="empty"><span>${S.more.toLocaleString('en-US')} more. Type a word to narrow it down, like lamp, neon or chandelier.</span></div>` : '') : `<div class="empty">${emptyMsg(t)}</div>`;
@@ -397,8 +397,8 @@
     const b = e.target.closest('[data-a]'); if (b && !modal.contains(b)) { e.stopPropagation(); act(b.dataset.a, b); return; }
     const tbtn = e.target.closest('.mode'); if (tbtn) { setTab(tbtn.dataset.t); return; }
     const c = e.target.closest('.chip'); if (c && chips.contains(c)) {
-      if (c.dataset.s) { S.src = c.dataset.s; keep('dps-studio-src', S.src); render(false); return; }
-      S.chip[S.tab === 'place' && S.src === 'lib' ? 'lib' : S.tab] = c.dataset.c; render(false); return;
+      if (c.dataset.s) { S.src = c.dataset.s; S.chip.lib = S.src === 'build' ? 'all' : 'lighting'; keep('dps-studio-src', S.src); render(false); return; }
+      S.chip[S.tab === 'place' && S.src !== 'housing' ? 'lib' : S.tab] = c.dataset.c; render(false); return;
     }
     const r = e.target.closest('.row'); if (r && list.contains(r) && !e.target.closest('.det')) { const i = +r.dataset.i; select(i, i === S.sel ? !S.open : true); }
   });
@@ -521,13 +521,17 @@
         S.here = m.here || null;
         if (m.pick !== undefined) S.pick = m.pick || null;
         S.pv = m.previewing || null;
-        S.src = store('dps-studio-src', 'lib');
+        S.src = store('dps-studio-src', 'decorate'); if (!['decorate', 'build', 'housing'].includes(S.src)) S.src = 'decorate';
         if (!S.lib) fetch('library.json').then((r) => r.json()).then((d) => {
           if (!d || !Array.isArray(d.groups)) throw new Error('bad');
           // label and search words worked out once, not on every key press
-          for (const g of d.groups) g.items = g.items.map(([m, src]) => { const label = pretty(m); return { m, src, label, hay: `${m} ${label} ${src} ${g.label}`.toLowerCase() }; });
+          for (const g of d.groups) {
+            g.items = g.items.map(([m, src, use]) => { const label = pretty(m); return { m, src, use: use === 'd' ? 'decorate' : 'build', label, hay: `${m} ${label} ${src} ${g.label}`.toLowerCase() }; });
+            g.n = { decorate: g.items.filter((i) => i.use === 'decorate').length, build: 0 };
+            g.n.build = g.items.length - g.n.decorate;
+          }
           S.lib = d; if (S.shown && S.tab === 'place') render(true);
-        }).catch(() => { S.src = 'housing'; toast('The full library did not load, showing housing furniture', true); if (S.shown && S.tab === 'place') render(true); });
+        }).catch(() => { S.src = 'housing'; toast('The library did not load, showing housing furniture', true); if (S.shown && S.tab === 'place') render(true); });
         (S.boot && !S.boot.missing ? Promise.resolve({ ok: true }) : post('boot').then((r) => {
           if (r && r.ok) {
             r.shells = Array.isArray(r.shells) ? r.shells : [];
