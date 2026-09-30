@@ -34,6 +34,7 @@ local function show(t)
 end
 
 local function hide()
+    if StudioC.Unlight then StudioC.Unlight() end
     open = false
     focus(false)
     nui({ action = 'hide' })
@@ -291,6 +292,7 @@ RegisterNUICallback('close', function(_, cb)
 end)
 
 RegisterNUICallback('tab', function(d, cb)
+    if StudioC.Unlight then StudioC.Unlight() end
     tab = d.tab or tab
     if tab ~= 'shells' and pv.on then previewStop() end
     cb({ ok = true, here = StudioC.RoomHere() })
@@ -373,6 +375,68 @@ RegisterNUICallback('place', function(d, cb)
         StudioC.Place(name, d.model)
         show('place')
     end)
+end)
+
+-- ---------------------------------------------------------------- NUI: the piece selector
+local lit   -- the entity outlined for the selected row
+
+local function pieceEnt(room, id)
+    for ent, info in pairs(StudioC.pieceByEntity) do
+        if info.name == room and info.id == id and DoesEntityExist(ent) then return ent, info end
+    end
+end
+
+local function unlight()
+    if lit and DoesEntityExist(lit) then SetEntityDrawOutline(lit, false) end
+    lit = nil
+end
+StudioC.Unlight = unlight
+
+RegisterNUICallback('pieces', function(_, cb)
+    local room = StudioC.RoomHere()
+    if not room then return cb({ ok = false, err = 'Go into a room first' }) end
+    local me = GetEntityCoords(cache.ped)
+    local out = {}
+    for ent, info in pairs(StudioC.pieceByEntity) do
+        if info.name == room and DoesEntityExist(ent) then
+            out[#out + 1] = { id = info.id, model = info.model, dist = math.floor(#(GetEntityCoords(ent) - me) * 10 + 0.5) / 10 }
+        end
+    end
+    table.sort(out, function(a, b) return a.dist < b.dist end)
+    cb({ ok = true, room = room, pieces = out })
+end)
+
+RegisterNUICallback('highlight', function(d, cb)
+    unlight()
+    local room = StudioC.RoomHere()
+    local ent = room and pieceEnt(room, tonumber(d.id))
+    if ent then
+        SetEntityDrawOutlineColor(255, 122, 69, 255)
+        SetEntityDrawOutline(ent, true)
+        lit = ent
+    end
+    cb({ ok = ent ~= nil })
+end)
+
+RegisterNUICallback('pieceMove', function(d, cb)
+    local room = StudioC.RoomHere()
+    local ent, info = room and pieceEnt(room, tonumber(d.id))
+    if not ent then return cb({ ok = false, err = 'That piece is gone' }) end
+    unlight()
+    leave()
+    cb({ ok = true })
+    CreateThread(function()
+        StudioC.Place(room, info.model, info.id, GetEntityHeading(ent), ent)
+        show('place')
+    end)
+end)
+
+RegisterNUICallback('pieceRemove', function(d, cb)
+    local room = StudioC.RoomHere()
+    local r = room and StudioC.rooms[room]
+    if not r then return cb({ ok = false, err = 'Go into a room first' }) end
+    unlight()
+    cb(call('dps-studio:pieceRemove', room, tonumber(d.id), r.data.look))
 end)
 
 RegisterNUICallback('edit', function(_, cb)

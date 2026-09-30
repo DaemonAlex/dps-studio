@@ -6,8 +6,8 @@
 StudioC = StudioC or {}
 
 local K = { click = 24, enter = 191, back = 194, back2 = 177, left = 174, right = 175, up = 172, down = 173,
-            wheelUp = 241, wheelDown = 242, e = 38, q = 44, del = 178, tab = 37, shift = 21, pgUp = 10, pgDn = 11 }
-local BLOCK = { 24, 25, 140, 141, 142, 14, 15, 16, 17, 37, 21, 10, 11, 44, 38, 178, 191, 194, 177, 172, 173, 174, 175, 241, 242, 200 }
+            wheelUp = 241, wheelDown = 242, e = 38, q = 44, del = 178, x = 73, tab = 37, shift = 21, pgUp = 10, pgDn = 11 }
+local BLOCK = { 24, 25, 140, 141, 142, 14, 15, 16, 17, 37, 21, 10, 11, 44, 38, 178, 73, 191, 194, 177, 172, 173, 174, 175, 241, 242, 200 }
 
 local function keys(title, list) SendNUIMessage({ action = 'keys', title = title, keys = list }) end
 local function hideKeys() SendNUIMessage({ action = 'keys' }) end
@@ -142,26 +142,50 @@ function StudioC.Place(roomName, model, id, heading, movingEnt)
     StudioC.SetBusy(false)
 end
 
----Look at a placed piece: E moves it, Delete removes it, Backspace ends.
+---The placed piece closest to the middle of the view, within 20 m. Picks by where you look,
+---not by a ray hit, so lamps, rugs and other pieces without a solid body can be picked too.
+local function pickPiece(roomName)
+    local cam, fwd = GetGameplayCamCoord(), camForward()
+    local best, bestScore
+    for ent, info in pairs(StudioC.pieceByEntity) do
+        if info.name == roomName and DoesEntityExist(ent) then
+            local mn, mx = GetModelDimensions(GetEntityModel(ent))
+            local centre = GetOffsetFromEntityInWorldCoords(ent, (mn.x + mx.x) / 2, (mn.y + mx.y) / 2, (mn.z + mx.z) / 2)
+            local to = centre - cam
+            local dist = #to
+            if dist > 0.3 and dist < 20.0 then
+                local cos = (to.x * fwd.x + to.y * fwd.y + to.z * fwd.z) / dist
+                -- how far off the centre of view, measured against the piece's own size
+                local off = math.sqrt(math.max(0.0, 1.0 - cos * cos)) * dist
+                local size = math.max(0.25, #(mx - mn) / 2)
+                if cos > 0.8 and off < size + 0.3 then
+                    local score = off / size + dist * 0.02
+                    if not bestScore or score < bestScore then best, bestScore = ent, score end
+                end
+            end
+        end
+    end
+    return best, best and StudioC.pieceByEntity[best]
+end
+
+---Look at a placed piece: E moves it, Delete or X removes it, Backspace ends.
 function StudioC.Edit(roomName)
     StudioC.SetBusy(true)
-    keys('Move or remove', { { 'Look', 'at a piece' }, { 'E', 'move it' }, { 'Delete', 'remove it' }, { 'Backspace', 'done' } })
+    keys('Move or remove', { { 'Look', 'at a piece, it lights up' }, { 'E', 'move it' }, { 'Delete or X', 'remove it' }, { 'Backspace', 'done' } })
     local last
     local function outline(e, on) if e and DoesEntityExist(e) then SetEntityDrawOutline(e, on) end end
     SetEntityDrawOutlineColor(255, 122, 69, 255)
     while true do
         blockKeys()
-        local _, _, ent = aim()
-        local info = ent and ent ~= 0 and StudioC.pieceByEntity[ent] or nil
-        if info and info.name ~= roomName then info = nil end
-        local target = info and ent or nil
+        DrawRect(0.5, 0.5, 0.003, 0.005, 255, 122, 69, 220)   -- a dot marks the middle of the view
+        local target, info = pickPiece(roomName)
         if last ~= target then outline(last, false); outline(target, true); last = target end
         if target and pressed(K.e) then
             outline(target, false)
             hideKeys()
             StudioC.SetBusy(false)
             return StudioC.Place(roomName, info.model, info.id, GetEntityHeading(target), target)
-        elseif target and pressed(K.del) then
+        elseif target and (pressed(K.del) or pressed(K.x)) then
             local r = StudioC.rooms[roomName]
             local ok, err = lib.callback.await('dps-studio:pieceRemove', false, roomName, info.id, r and r.data.look)
             lib.notify({ type = ok and 'success' or 'error', description = ok and 'Removed' or err })

@@ -12,7 +12,7 @@
   const TABS = ['rooms', 'place', 'shells', 'inspect', 'spots', 'doors', 'history'];
   const HINTS = {
     rooms: '<kbd>↑↓</kbd> move &nbsp;<kbd>Enter</kbd> open &nbsp;<kbd>N</kbd> new room at my spot &nbsp;<kbd>1-7</kbd> tabs &nbsp;<kbd>Tab</kbd> buttons &nbsp;<kbd>Esc</kbd> close',
-    place: '<kbd>↑↓</kbd> move &nbsp;<kbd>Enter</kbd> place it &nbsp;<kbd>M</kbd> move or remove pieces · type to search',
+    place: '<kbd>↑↓</kbd> move &nbsp;<kbd>Enter</kbd> place or move &nbsp;<kbd>M</kbd> pieces in this room &nbsp;<kbd>Delete</kbd> remove · type to search',
     shells: '<kbd>↑↓</kbd> next shell &nbsp;<kbd>← →</kbd> or drag to turn &nbsp;<kbd>Page Up / Down</kbd> tilt &nbsp;wheel zoom &nbsp;<kbd>Enter</kbd> walk inside',
     inspect: 'Hold <kbd>Middle mouse</kbd> anywhere to inspect. The last 30 are kept here.',
     spots: '<kbd>Page Up</kbd> marks a spot &nbsp;<kbd>F3</kbd> captures coords &nbsp;<kbd>Enter</kbd> open · type to search',
@@ -23,7 +23,7 @@
 
   const S = { tab: 'rooms', boot: null, rooms: [], spots: [], hist: [], scans: [], here: null, pick: null,
               items: [], sel: -1, open: false, chip: { place: 'all', lib: 'lighting', shells: 'all', spots: 'all' }, q: {}, shellTimer: null, shown: false, pv: null,
-              src: 'decorate', lib: null, bad: new Set(), more: 0 };
+              src: 'decorate', lib: null, bad: new Set(), more: 0, pieces: [] };
   const LIB_ICON = { lighting: 'fa-lightbulb', seating: 'fa-couch', tables: 'fa-table', beds: 'fa-bed', storage: 'fa-box-archive', kitchen: 'fa-kitchen-set',
     bathroom: 'fa-bath', bar: 'fa-martini-glass', electronics: 'fa-tv', office: 'fa-briefcase', decor: 'fa-image', plants: 'fa-seedling', gym: 'fa-dumbbell',
     crime: 'fa-screwdriver-wrench', street: 'fa-road-barrier', other: 'fa-cube', mappieces: 'fa-puzzle-piece' };
@@ -97,6 +97,10 @@
       case 'place': {
         const out = [];
         S.more = 0;
+        if (S.src === 'pieces') {
+          return S.pieces.filter((p) => match(`${p.model} ${pretty(p.model)}`))
+            .map((p) => ({ object: p.model, label: pretty(p.model), id: p.id, dist: p.dist, piece: true }));
+        }
         if (S.src === 'decorate' || S.src === 'build') {
           if (!S.lib) return out;
           const words = words_(q.value);
@@ -145,7 +149,9 @@
       rt = pieceMeter(it.count, it.max) + (S.here === it.name ? '<span class="badge on">You are here</span>' : '');
     } else if (tab === 'place') {
       thumb = it.img ? `<img src="${esc(it.img)}" alt="" loading="lazy">` : `<i class="fa-solid ${it.lib ? (LIB_ICON[it.gkey] || 'fa-cube') : 'fa-couch'}"></i>`;
-      nm = esc(it.label); mt = `<code>${esc(it.object)}</code> · ${esc(it.cat)}${it.lib ? ' · ' + esc(it.src === 'Game' ? 'game' : it.src) : ''}`;
+      nm = esc(it.label);
+      mt = it.piece ? `<code>${esc(it.object)}</code> · ${it.dist} m from you` : `<code>${esc(it.object)}</code> · ${esc(it.cat)}${it.lib ? ' · ' + esc(it.src === 'Game' ? 'game' : it.src) : ''}`;
+      if (it.piece) thumb = '<i class="fa-solid fa-location-crosshairs"></i>';
     } else if (tab === 'shells') {
       const m = it.meta;
       thumb = `<i class="fa-solid ${m && m.use === 'garage' ? 'fa-warehouse' : m && m.use === 'business' ? 'fa-briefcase' : 'fa-cube'}"></i>`;
@@ -183,6 +189,7 @@
         <div class="acts"><button class="bad" data-a="delete">Remove room</button></div>
         <p>Last change: ${esc(it.updatedBy || '-')} · ${esc(it.updatedAt || '-')}</p></div>`;
     }
+    if (tab === 'place' && it.piece) return `<div class="det"><p>This piece is lit up orange in the room.</p><div class="acts"><button class="pri" data-a="pieceMove">Move it <kbd>Enter</kbd></button><button class="bad" data-a="pieceRemove">Remove <kbd>Delete</kbd></button><button data-a="copyName">Copy name</button></div></div>`;
     if (tab === 'place') return `<div class="det"><div class="acts"><button class="pri" data-a="place">Place it <kbd>Enter</kbd></button><button data-a="copyName">Copy name</button></div></div>`;
     if (tab === 'shells') {
       const pick = S.pick ? `<p>Walk inside, find where people should arrive, face into the room and press <kbd>G</kbd>.</p>` : '';
@@ -213,7 +220,7 @@
     if (t === 'rooms') h = `<span class="grow">${S.rooms.length} rooms. A room is a door, a shell and saved looks of furniture.</span><button class="btn pri" data-a="newRoom">New room at my spot <kbd>N</kbd></button>`;
     else if (t === 'place') {
       const r = roomByName(S.here);
-      h = r ? `<span class="grow"><b>${esc(r.label)}</b> · look <b>${esc(r.lookName)}</b></span>${pieceMeter(r.count, r.max)}<button class="btn" data-a="edit">Move or remove <kbd>M</kbd></button>` : '';
+      h = r ? `<span class="grow"><b>${esc(r.label)}</b> · look <b>${esc(r.lookName)}</b></span>${pieceMeter(r.count, r.max)}<button class="btn" data-a="showPieces">Move or remove <kbd>M</kbd></button>` : '';
     } else if (t === 'shells') h = `<span class="grow">${S.boot ? S.boot.shells.length : 0} shells from the housing list. The one you pick floats in the sky so open shells show from every side.</span>`;
     else if (t === 'spots') h = `<span class="grow">${S.spots.length} spots, newest first.</span><button class="btn pri" data-a="markSpot">Mark my spot</button>`;
     else if (t === 'inspect') h = `<span class="grow">Hold middle mouse and aim. Close this panel first so you can look around.</span>`;
@@ -221,8 +228,9 @@
 
     let c = '';
     if (t === 'place' && S.here) {
-      const srcs = `<button class="chip src${S.src === 'decorate' ? ' on' : ''}" data-s="decorate"><i class="fa-solid fa-couch"></i> Decorate</button><button class="chip src${S.src === 'build' ? ' on' : ''}" data-s="build"><i class="fa-solid fa-trowel-bricks"></i> Build</button><button class="chip src${S.src === 'housing' ? ' on' : ''}" data-s="housing"><i class="fa-solid fa-image"></i> Housing furniture, with pictures</button><span class="brk"></span>`;
-      if ((S.src === 'decorate' || S.src === 'build') && S.lib) c = srcs + [['all', 'All']].concat(S.lib.groups.filter((g) => g.n[S.src] > 0).map((g) => [g.key, g.label])).map(([k, l]) => `<button class="chip${S.chip.lib === k && !q.value.trim() ? ' on' : ''}" data-c="${esc(k)}">${esc(l)}</button>`).join('') + (q.value.trim() ? '<span class="brk"></span><span class="hint2">Searching every group</span>' : '');
+      const srcs = `<button class="chip src${S.src === 'pieces' ? ' on' : ''}" data-s="pieces"><i class="fa-solid fa-location-crosshairs"></i> In this room${S.pieces.length ? ' · ' + S.pieces.length : ''}</button><button class="chip src${S.src === 'decorate' ? ' on' : ''}" data-s="decorate"><i class="fa-solid fa-couch"></i> Decorate</button><button class="chip src${S.src === 'build' ? ' on' : ''}" data-s="build"><i class="fa-solid fa-trowel-bricks"></i> Build</button><button class="chip src${S.src === 'housing' ? ' on' : ''}" data-s="housing"><i class="fa-solid fa-image"></i> Housing furniture, with pictures</button><span class="brk"></span>`;
+      if (S.src === 'pieces') c = srcs;
+      else if ((S.src === 'decorate' || S.src === 'build') && S.lib) c = srcs + [['all', 'All']].concat(S.lib.groups.filter((g) => g.n[S.src] > 0).map((g) => [g.key, g.label])).map(([k, l]) => `<button class="chip${S.chip.lib === k && !q.value.trim() ? ' on' : ''}" data-c="${esc(k)}">${esc(l)}</button>`).join('') + (q.value.trim() ? '<span class="brk"></span><span class="hint2">Searching every group</span>' : '');
       else if (S.boot) c = srcs + [['all', 'All']].concat(S.boot.furniture.map((f) => [f.key, f.label])).map(([k, l]) => `<button class="chip${S.chip.place === k ? ' on' : ''}" data-c="${esc(k)}">${esc(l)}</button>`).join('');
       else c = srcs;
     }
@@ -241,7 +249,7 @@
     q.disabled = t === 'doors'; q.placeholder = PH[t] || '';
     stage.hidden = !(t === 'shells' && S.shown);
     if (t === 'doors') { list.innerHTML = doorsDoc(); S.items = []; $('#cnt').textContent = ''; return; }
-    if (t === 'place' && S.here && S.src !== 'housing' && !S.lib) { renderHead(); list.innerHTML = '<div class="empty"><b>Loading the library…</b></div>'; S.items = []; return; }
+    if (t === 'place' && S.here && (S.src === 'decorate' || S.src === 'build') && !S.lib) { renderHead(); list.innerHTML = '<div class="empty"><b>Loading the library…</b></div>'; S.items = []; return; }
     if (t === 'place' && !S.here) { list.innerHTML = placeEmpty(); S.items = []; $('#cnt').textContent = ''; return; }
     S.items = itemsFor(t);
     list.innerHTML = S.items.length ? S.items.map((it, i) => rowHtml(t, it, i)).join('') + (S.more ? `<div class="empty"><span>${S.more.toLocaleString('en-US')} more. Type a word to narrow it down, like lamp, neon or chandelier.</span></div>` : '') : `<div class="empty">${emptyMsg(t)}</div>`;
@@ -287,12 +295,16 @@
     if (S.open || S.tab === 'shells') r.insertAdjacentHTML('beforeend', detHtml(S.tab, S.items[i]));
     if (!noScroll) r.scrollIntoView({ block: 'nearest' });
     if (S.tab === 'shells') previewSoon(S.items[i].model);
+    if (S.tab === 'place' && S.src === 'pieces' && S.items[i].piece) post('highlight', { id: S.items[i].id });
   }
 
   /* ---------- loading ---------- */
   function load(tab) {
     const t = tab || S.tab;
-    if (t === 'rooms' || t === 'place') return post('rooms').then((r) => { S.rooms = Array.isArray(r) ? r : []; if (S.tab === t) render(true); });
+    if (t === 'rooms' || t === 'place') {
+      if (t === 'place' && S.src === 'pieces') loadPieces();
+      return post('rooms').then((r) => { S.rooms = Array.isArray(r) ? r : []; if (S.tab === t) render(true); });
+    }
     if (t === 'spots') return post('spots').then((r) => { S.spots = Array.isArray(r) ? r : []; if (S.tab === t) render(true); });
     if (t === 'history') return post('history').then((r) => { S.hist = Array.isArray(r) ? r : []; if (S.tab === t) render(true); });
     if (t === 'inspect') return post('scans').then((r) => { S.scans = Array.isArray(r) ? r : []; if (S.tab === t) render(true); });
@@ -308,6 +320,16 @@
     keep('dps-studio-tab', t);
     post('tab', { tab: t }).then((r) => { if (r && r.here !== undefined) S.here = r.here || null; load(t); });
     render(same);
+  }
+  function loadPieces() {
+    return post('pieces').then((r) => { S.pieces = (r && r.ok && Array.isArray(r.pieces)) ? r.pieces : []; if (S.tab === 'place' && S.src === 'pieces') render(true); });
+  }
+  function setSrc(src) {
+    S.src = src;
+    if (src !== 'housing' && src !== 'pieces') S.chip.lib = src === 'build' ? 'all' : 'lighting';
+    if (src !== 'pieces') { keep('dps-studio-src', src); post('highlight', { id: -1 }); }
+    if (src === 'pieces') loadPieces();
+    render(false);
   }
   function previewSoon(model) {
     clearTimeout(S.shellTimer);
@@ -372,7 +394,9 @@
         if (!await confirmBox('Remove room', `${it.label} goes away for everyone. It stays in History and can be put back.`, 'Remove')) return;
         post('roomDelete', { name: it.name }).then((r) => { if (result(r, 'Removed')) load(); }); return;
       }
-      case 'edit': post('edit').then((r) => result(r)); return;
+      case 'edit': case 'showPieces': setSrc('pieces'); return;
+      case 'pieceMove': if (it && it.piece) post('pieceMove', { id: it.id }).then((r) => result(r)); return;
+      case 'pieceRemove': if (it && it.piece) post('pieceRemove', { id: it.id }).then((r) => { if (result(r, 'Removed. History can put it back.')) loadPieces(); }); return;
       case 'place': if (it) post('place', { model: it.object }).then((r) => result(r)); return;
       case 'walk': post('walk'); return;
       case 'stop': clearTimeout(S.shellTimer); S.pv = null; post('previewStop'); return;
@@ -397,7 +421,7 @@
     const b = e.target.closest('[data-a]'); if (b && !modal.contains(b)) { e.stopPropagation(); act(b.dataset.a, b); return; }
     const tbtn = e.target.closest('.mode'); if (tbtn) { setTab(tbtn.dataset.t); return; }
     const c = e.target.closest('.chip'); if (c && chips.contains(c)) {
-      if (c.dataset.s) { S.src = c.dataset.s; S.chip.lib = S.src === 'build' ? 'all' : 'lighting'; keep('dps-studio-src', S.src); render(false); return; }
+      if (c.dataset.s) { setSrc(c.dataset.s); return; }
       S.chip[S.tab === 'place' && S.src !== 'housing' ? 'lib' : S.tab] = c.dataset.c; render(false); return;
     }
     const r = e.target.closest('.row'); if (r && list.contains(r) && !e.target.closest('.det')) { const i = +r.dataset.i; select(i, i === S.sel ? !S.open : true); }
@@ -414,7 +438,7 @@
   function primary() {
     const t = S.tab;
     if (t === 'rooms') return act('decorate');
-    if (t === 'place') return act('place');
+    if (t === 'place') return act(S.src === 'pieces' ? 'pieceMove' : 'place');
     if (t === 'shells') return act('walk');
     if (t === 'spots') { const it = S.items[S.sel]; if (it) copy(`vector4(${f2(it.x)}, ${f2(it.y)}, ${f2(it.z)}, ${Number(it.h || 0).toFixed(1)})`); return; }
     if (t === 'history') return select(S.sel, true);
@@ -443,7 +467,8 @@
       if (k === 'pagedown') { e.preventDefault(); return post('cam', { tilt: -0.08 }); }
     }
     if (S.tab === 'rooms' && k === 'n') { e.preventDefault(); return act('newRoom'); }
-    if (S.tab === 'place' && k === 'm') { e.preventDefault(); return act('edit'); }
+    if (S.tab === 'place' && k === 'm') { e.preventDefault(); return act('showPieces'); }
+    if (S.tab === 'place' && S.src === 'pieces' && e.key === 'Delete') { e.preventDefault(); return act('pieceRemove'); }
     if (k.length === 1 && k !== ' ' && !e.ctrlKey && !e.altKey && !e.metaKey && S.tab !== 'doors') q.focus();
   });
 
