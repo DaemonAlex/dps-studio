@@ -221,8 +221,7 @@
     if (t === 'rooms') h = `<span class="grow">${S.rooms.length} rooms. A room is a door, a shell and saved looks of furniture.</span><button class="btn pri" data-a="newRoom">New room at my spot <kbd>N</kbd></button>`;
     else if (t === 'place') {
       const r = roomByName(S.here);
-      const need = boothList().length;
-      h = r ? `<span class="grow"><b>${esc(r.label)}</b> · look <b>${esc(r.lookName)}</b></span>${pieceMeter(r.count, r.max)}<button class="btn" data-a="showPieces">Move or remove <kbd>M</kbd></button>${need ? `<button class="btn" data-a="booth"><i class="fa-solid fa-camera"></i>&nbsp;Take photos · ${need.toLocaleString('en-US')}</button>` : ''}` : '';
+      h = (r ? `<span class="grow"><b>${esc(r.label)}</b> · look <b>${esc(r.lookName)}</b></span>${pieceMeter(r.count, r.max)}<button class="btn" data-a="showPieces">Move or remove <kbd>M</kbd></button>` : '<span class="grow">Place</span>') + boothButton();
     } else if (t === 'shells') h = `<span class="grow">${S.boot ? S.boot.shells.length : 0} shells from the housing list. The one you pick floats in the sky so open shells show from every side.</span>`;
     else if (t === 'spots') h = `<span class="grow">${S.spots.length} spots, newest first.</span><button class="btn pri" data-a="markSpot">Mark my spot</button>`;
     else if (t === 'inspect') h = `<span class="grow">Hold middle mouse and aim. Close this panel first so you can look around.</span>`;
@@ -252,7 +251,7 @@
     stage.hidden = !(t === 'shells' && S.shown);
     if (t === 'doors') { list.innerHTML = doorsDoc(); S.items = []; $('#cnt').textContent = ''; return; }
     if (t === 'place' && S.here && (S.src === 'decorate' || S.src === 'build') && !S.lib) { renderHead(); list.innerHTML = '<div class="empty"><b>Loading the library…</b></div>'; S.items = []; return; }
-    if (t === 'place' && !S.here) { list.innerHTML = placeEmpty(); S.items = []; $('#cnt').textContent = ''; return; }
+    if (t === 'place' && !S.here) { renderHead(); list.innerHTML = placeEmpty(); S.items = []; $('#cnt').textContent = ''; return; }
     S.items = itemsFor(t);
     list.innerHTML = S.items.length ? S.items.map((it, i) => rowHtml(t, it, i)).join('') + (S.more ? `<div class="empty"><span>${S.more.toLocaleString('en-US')} more. Type a word to narrow it down, like lamp, neon or chandelier.</span></div>` : '') : `<div class="empty">${emptyMsg(t)}</div>`;
     $('#cnt').textContent = S.items.length ? (S.more ? `${S.items.length}+${S.more}` : String(S.items.length)) : '';
@@ -325,10 +324,16 @@
   }
   // pieces on the chosen side (Decorate or Build) that still have no picture
   function boothList() {
-    if (!S.lib || (S.src !== 'decorate' && S.src !== 'build')) return [];
+    if (!S.lib) return [];
+    const side = S.src === 'build' ? 'build' : 'decorate';
     const out = [];
-    for (const g of S.lib.groups) for (const it of g.items) if (it.use === S.src && !S.bad.has(it.m) && !S.thumbs[it.m]) out.push(it.m);
+    for (const g of S.lib.groups) for (const it of g.items) if (it.use === side && !S.bad.has(it.m) && !S.thumbs[it.m]) out.push(it.m);
     return out;
+  }
+  function boothButton() {
+    if (!S.lib) return '';
+    const need = boothList().length;
+    return need ? `<button class="btn pri" data-a="booth"><i class="fa-solid fa-camera"></i>&nbsp;Take photos · ${need.toLocaleString('en-US')} to go</button>` : '<span class="badge on">Every piece has a photo</span>';
   }
   function loadThumbs() { return post('thumbs').then((t) => { if (t && typeof t === 'object' && !Array.isArray(t)) S.thumbs = t; if (S.shown && S.tab === 'place') render(true); }); }
   // crop the middle of a full screenshot to a small square webp for the booth
