@@ -67,21 +67,45 @@ function Studio.ParseFurniture(src, imagePath, vec)
     if debug and debug.sethook then debug.sethook(co, function() error('furniture file ran too long') end, '', 5e7) end
     local ok = coroutine.resume(co)
     if not ok or coroutine.status(co) ~= 'dead' then return cats, models end
-    for key, c in pairs(type(env.Config.Furniture) == 'table' and env.Config.Furniture or {}) do
-        local items = {}
+    -- A piece may sit in several groups (the vendor file repeats them), so duplicates are only
+    -- dropped inside a group. Groups holding exactly the same pieces are shown once, with all
+    -- their names ("Table · PC table · Couch table").
+    local keys = {}
+    for key in pairs(type(env.Config.Furniture) == 'table' and env.Config.Furniture or {}) do keys[#keys + 1] = tostring(key) end
+    table.sort(keys)
+    local bySig = {}
+    for _, key in ipairs(keys) do
+        local c = env.Config.Furniture[key]
+        local items, seen, objs = {}, {}, {}
         for _, it in ipairs(type(c) == 'table' and type(c.items) == 'table' and c.items or {}) do
             local obj = type(it) == 'table' and it.object or nil
-            if type(obj) == 'string' and obj:match('^[%w_%-]+$') and not models[obj] then
+            if type(obj) == 'string' and obj:match('^[%w_%-]+$') and not seen[obj] then
+                seen[obj] = true
                 models[obj] = true
+                objs[#objs + 1] = obj
                 items[#items + 1] = { object = obj, label = tostring(it.label or obj), img = type(it.img) == 'string' and it.img or nil }
             end
         end
         if #items > 0 then
-            table.sort(items, function(a, b) return a.label < b.label end)
-            cats[#cats + 1] = { key = tostring(key), label = tostring(c.label or key), items = items }
+            table.sort(objs)
+            local sig = table.concat(objs, ',')
+            local label = tostring(type(c) == 'table' and c.label or key)
+            local same = bySig[sig]
+            if same then
+                if not same.names[label] then
+                    same.names[label] = true
+                    same.label = same.label .. ' · ' .. label
+                end
+            else
+                table.sort(items, function(x, y) return x.label < y.label end)
+                local cat = { key = key, label = label, items = items, names = { [label] = true } }
+                bySig[sig] = cat
+                cats[#cats + 1] = cat
+            end
         end
     end
-    table.sort(cats, function(a, b) return a.label < b.label end)
+    for _, c in ipairs(cats) do c.names = nil end
+    table.sort(cats, function(x, y) return x.label < y.label end)
     return cats, models
 end
 

@@ -32,6 +32,13 @@ check('furniture: image path joined', cats[1].items[1].img == 'nui://x/a.png')
 check('furniture: bad model name refused', models['bad name!'] == nil and models.prop_a)
 check('furniture: sandbox cannot reach os', #Studio.ParseFurniture('os.exit(1)', '') == 0)
 check('furniture: broken file gives empty', #Studio.ParseFurniture('this is not lua', '') == 0)
+local dsrc = "Config.Furniture = { ['a'] = { label = 'Table', items = { { object = 'p1', label = 'One' }, { object = 'p2', label = 'Two' } } }, ['b'] = { label = 'PC table', items = { { object = 'p2', label = 'Two' }, { object = 'p1', label = 'One' } } }, ['c'] = { label = 'Chair', items = { { object = 'p1', label = 'One' }, { object = 'p3', label = 'Three' }, { object = 'p3', label = 'Three' } } } }"
+local dc = Studio.ParseFurniture(dsrc, '', {})
+local byLabel = {}; for _, c in ipairs(dc) do byLabel[c.label] = c end
+check('furniture: a piece shared by groups shows in each group', byLabel['Chair'] and #byLabel['Chair'].items == 2)
+check('furniture: groups with the same pieces show once, with both names', #dc == 2 and byLabel['Table · PC table'] ~= nil)
+local d2 = Studio.ParseFurniture("Config.Furniture = { ['a'] = { label = 'Couch Table', items = { { object = 'p1' } } }, ['b'] = { label = 'Table', items = { { object = 'p1' } } } }", '', {})
+check('furniture: a name inside another name still shows', #d2 == 1 and d2[1].label == 'Couch Table · Table')
 
 -- spots and offsets
 check('spot valid', Studio.ValidSpot({ x = 1, y = 2, z = 3, h = 4 }))
