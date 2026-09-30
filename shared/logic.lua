@@ -253,6 +253,7 @@ function Studio.PublicRoom(room)
     local look = Studio.ActiveLook(room)
     return { name = room.name, label = room.label, shell = room.shell, kind = room.kind or 'shell', ipl = room.ipl,
              entrance = room.entrance, exit = room.exit, look = look and look.id or nil,
+             access = room.access and Studio.CleanAccess(room.access) or { open = true },
              style = look and copyStyle(look.style) or nil, pieces = look and copyPieces(look.pieces) or {} }
 end
 
@@ -263,6 +264,7 @@ function Studio.RoomSummary(room)
     local active = Studio.ActiveLook(room)
     return { name = room.name, label = room.label, shell = room.shell, kind = room.kind or 'shell', ipl = room.ipl,
              style = active and copyStyle(active.style) or nil, entrance = room.entrance, exit = room.exit,
+             access = room.access and Studio.CleanAccess(room.access) or { open = true }, doors = room.doors or {},
              look = room.look, lookName = active and active.name or '', count = active and #active.pieces or 0,
              max = Studio.MAX_PIECES, looks = looks, updatedBy = room.updatedBy, updatedAt = room.updatedAt }
 end
@@ -301,6 +303,57 @@ function Studio.CleanRoom(room, shellSet, models, iplSet)
     end
     if not Studio.FindLook(room, room.look) then room.look = room.looks[1].id end
     return room, nil, dropped
+end
+
+---Who may open a door (ox_doorlock door or a Studio room door). Anyone who matches ANY part:
+---groups[job or gang] = lowest grade, items = key item names, characters = citizen ids,
+---staff = admins, passcode. open = true means everyone, and wins over the rest.
+function Studio.CleanAccess(a)
+    if type(a) ~= 'table' then return { open = true } end
+    local out = { open = a.open == true, staff = a.staff == true, groups = {}, items = {}, characters = {} }
+    local n = 0
+    for g, grade in pairs(type(a.groups) == 'table' and a.groups or {}) do
+        n = n + 1
+        if n > 40 then break end
+        if type(g) == 'string' and g:match('^[%w_%-]+$') and #g <= 40 then
+            out.groups[g] = math.max(0, math.min(50, math.floor(tonumber(grade) or 0)))
+        end
+    end
+    for i, it in ipairs(type(a.items) == 'table' and a.items or {}) do
+        if i > 20 then break end
+        if type(it) == 'string' and it:match('^[%w_%-]+$') and #it <= 60 then out.items[#out.items + 1] = it end
+    end
+    for i, c in ipairs(type(a.characters) == 'table' and a.characters or {}) do
+        if i > 40 then break end
+        if type(c) == 'string' and c:match('^[%w]+$') and #c <= 20 then out.characters[#out.characters + 1] = c end
+    end
+    if type(a.passcode) == 'string' and a.passcode:match('^[%w]+$') and #a.passcode <= 12 then out.passcode = a.passcode end
+    return out
+end
+
+---The ox_doorlock fields for an access. '' clears a field in ox_doorlock's editDoor.
+function Studio.AccessToOx(a)
+    a = Studio.CleanAccess(a)
+    if a.open then return { groups = '', items = '', characters = '', passcode = '' } end
+    return {
+        groups = next(a.groups) and a.groups or '',
+        items = #a.items > 0 and a.items or '',
+        characters = #a.characters > 0 and a.characters or '',
+        passcode = a.passcode or '',
+    }
+end
+
+---Whether a player (job, grade, gang, gang grade, citizen id, has(item), isStaff) passes an access.
+function Studio.AccessAllows(a, who)
+    a = Studio.CleanAccess(a)
+    if a.open then return true end
+    if a.staff and who.staff then return true end
+    for g, grade in pairs(a.groups) do
+        if (who.job == g and (who.grade or 0) >= grade) or (who.gang == g and (who.gangGrade or 0) >= grade) then return true end
+    end
+    for _, c in ipairs(a.characters) do if c == who.citizenid then return true end end
+    for _, it in ipairs(a.items) do if who.has and who.has(it) then return true end end
+    return false
 end
 
 ---Deep copy through plain tables (rooms hold only strings, numbers, booleans and tables).

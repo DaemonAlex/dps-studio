@@ -150,7 +150,7 @@ local function iplWalk()
                 local p = GetEntityCoords(ped)
                 local export = StudioC.IplVisiting()
                 local d = { kind = 'ipl', ipl = export, style = StudioC.IplVisitStyle and StudioC.IplVisitStyle() or nil,
-                            name = pick.name, label = pick.label, entrance = pick.entrance, redo = pick.redo == true,
+                            name = pick.name, label = pick.label, entrance = pick.entrance, redo = pick.redo == true, access = pick.access,
                             exit = { x = p.x, y = p.y, z = p.z, h = GetEntityHeading(ped) } }
                 local ok, err = lib.callback.await('dps-studio:roomCreate', false, d)
                 if ok then
@@ -244,7 +244,7 @@ local function walk()
             elseif pick and IsDisabledControlJustPressed(0, 47) then -- G: the way out is here
                 local ped2 = cache.ped
                 local off = GetEntityCoords(ped2) - BASE
-                local d = { name = pick.name, label = pick.label, shell = pv.model, entrance = pick.entrance, redo = pick.redo == true,
+                local d = { name = pick.name, label = pick.label, shell = pv.model, entrance = pick.entrance, redo = pick.redo == true, access = pick.access,
                             exit = { x = off.x, y = off.y, z = off.z, h = GetEntityHeading(ped2) } }
                 local ok, err = lib.callback.await('dps-studio:roomCreate', false, d)
                 if ok then
@@ -399,7 +399,8 @@ RegisterNUICallback('roomNew', function(d, cb)
         if cache.vehicle then return cb({ ok = false, err = 'Get out of the vehicle first' }) end
         entrance = mySpot()
     end
-    pick = { name = d.name, label = d.label, entrance = entrance, redo = d.keepDoor == true }
+    pick = { name = d.name, label = d.label, entrance = entrance, redo = d.keepDoor == true,
+             access = Studio.CleanAccess(d.access or (d.keepDoor and StudioC.rooms[d.name] and StudioC.rooms[d.name].data.access) or nil) }
     cb({ ok = true })
 end)
 
@@ -457,6 +458,45 @@ StudioC.Unlight = unlight
 
 RegisterNUICallback('ipls', function(_, cb) cb(StudioC.IplCatalogue()) end)
 
+-- ---------------------------------------------------------------- NUI: doors
+RegisterNUICallback('doorPickers', function(_, cb) cb(lib.callback.await('dps-studio:doorPickers', false) or {}) end)
+RegisterNUICallback('doorsList', function(_, cb) cb(lib.callback.await('dps-studio:doors', false) or {}) end)
+RegisterNUICallback('doorSave', function(d, cb) cb(call('dps-studio:doorSave', tonumber(d.id), d.f)) end)
+RegisterNUICallback('roomAccess', function(d, cb) cb(call('dps-studio:roomAccess', d.name, d.access)) end)
+
+RegisterNUICallback('doorNew', function(d, cb)
+    local name = Studio.CleanLabel(d.name, 40)
+    if not name then return cb({ ok = false, err = 'Door name: 1 to 40 letters' }) end
+    leave()
+    cb({ ok = true })
+    CreateThread(function()
+        local shape = StudioC.PickDoor('New door: ' .. name)
+        if shape then
+            local ok, res = StudioC.CreateDoor(shape, name, d.access, { locked = d.locked ~= false })
+            notify(ok == true, ok and (res .. ' is saved in the door system') or (res or 'Door not saved'))
+        end
+        show('doors')
+    end)
+end)
+
+RegisterNUICallback('doorRemove', function(d, cb)
+    local ok, err = StudioC.RemoveDoor(tonumber(d.id))
+    cb({ ok = ok, err = err })
+end)
+
+RegisterNUICallback('doorGo', function(d, cb)
+    local x, y, z = tonumber(d.x), tonumber(d.y), tonumber(d.z)
+    if not (x and y and z) then return cb({ ok = false }) end
+    leave()
+    tpTo(x, y, z, 0.0)
+    cb({ ok = true })
+end)
+
+RegisterNUICallback('doorRestore', function(d, cb)
+    local ok, err = StudioC.RestoreDoor(tonumber(d.id))
+    cb({ ok = ok, err = err })
+end)
+
 -- "Use a place I go to": the panel closes, the admin gets to any interior or map by any means,
 -- stands where people should arrive and presses G. The room is then that place in the world.
 local placeWalking = false
@@ -477,15 +517,26 @@ RegisterNUICallback('placeWalk', function(_, cb)
             elseif IsDisabledControlJustPressed(0, 47) and pick and not cache.vehicle then
                 local ped = cache.ped
                 local p = GetEntityCoords(ped)
-                local d = { kind = 'ipl', ipl = Studio.PlaceKey(p), style = { preset = 'default' },
+                local d = { kind = 'ipl', ipl = Studio.PlaceKey(p), style = { preset = 'default' }, access = pick.access,
                             name = pick.name, label = pick.label, entrance = pick.entrance, redo = pick.redo == true,
                             exit = { x = p.x, y = p.y, z = p.z, h = GetEntityHeading(ped) } }
                 local ok, err = lib.callback.await('dps-studio:roomCreate', false, d)
                 if ok then
                     placeWalking = false
+                    local made = pick
                     pick = nil
                     nui({ action = 'keys' })
-                    notify(true, ('%s is ready. Its door is where you started; press E there to try it.'):format(d.label))
+                    -- the doors of the place: each one goes into ox_doorlock with the same access
+                    local n = 0
+                    while true do
+                        local shape = StudioC.PickDoor(('Doors of %s: pick one, Backspace when done'):format(made.label))
+                        if not shape then break end
+                        n = n + 1
+                        local okD, errD = StudioC.CreateDoor(shape, ('%s door %d'):format(made.label, n), made.access,
+                            { locked = not (made.access and made.access.open) }, made.name)
+                        if not okD then notify(false, errD or 'Door not saved') end
+                    end
+                    notify(true, ('%s is ready with %d door%s.'):format(d.label, n, n == 1 and '' or 's'))
                 else
                     notify(false, err or 'Not saved')
                 end

@@ -180,10 +180,16 @@ local function door(key, coords, text, onUse)
     return lib.points.new({
         coords = coords,
         distance = 2.0,
-        onEnter = function() prompt = key; nui({ action = 'prompt', key = 'E', text = text }) end,
+        onEnter = function()
+            prompt = key
+            local t = type(text) == 'function' and text() or text
+            nui({ action = 'prompt', key = t:find('^Locked') and '' or 'E', text = t })
+        end,
         onExit = function() if prompt == key then prompt = nil; nui({ action = 'prompt' }) end end,
         nearby = function()
             if IsControlJustPressed(0, 38) and not StudioC.busy and not StudioC.moving then
+                local t = type(text) == 'function' and text() or text
+                if t:find('^Locked') then return lib.notify({ type = 'error', description = t:gsub('^Locked · ', '') .. ' is locked' }) end
                 prompt = nil
                 nui({ action = 'prompt' })
                 StudioC.moving = true
@@ -229,7 +235,10 @@ local function addRoom(p, respawn)
             onEnter = function() if p.kind ~= 'ipl' then CreateThread(function() StudioC.SpawnRoom(name) end) end end,
             onExit = function() despawn(name) end,
         }),
-        door(name .. ':in', doorPos, 'Enter ' .. p.label, function() if StudioC.Move(out, p.exit.h, name) then setInside(name, true) end end),
+        door(name .. ':in', doorPos, function() return StudioC.MayEnter(p) and ('Enter ' .. p.label) or ('Locked · ' .. p.label) end, function()
+            if not StudioC.MayEnter(p) then return lib.notify({ type = 'error', description = p.label .. ' is locked' }) end
+            if StudioC.Move(out, p.exit.h, name) then setInside(name, true) end
+        end),
         door(name .. ':out', out, 'Leave ' .. p.label, function() if StudioC.Move(doorPos, (p.entrance.h + 180.0) % 360.0) then setInside(name, false) end end),
     }
     if respawn and (p.kind ~= 'ipl' or inside[name]) then CreateThread(function() StudioC.SpawnRoom(name) end) end   -- redraw at once after an edit
@@ -290,13 +299,16 @@ RegisterNetEvent('dps-studio:room', function(name, p)
     local old = StudioC.rooms[name]
     if p and old and old.data.shell == p.shell and old.data.ipl == p.ipl and same(old.data.entrance, p.entrance) and same(old.data.exit, p.exit) and shells[name] then
         if p.kind == 'ipl' and inside[name] then StudioC.IplApply(p.ipl, p.style) end   -- a new style shows at once
-        if old.data.label ~= p.label then
+        if old.data.label ~= p.label or json.encode(old.data.access or {}) ~= json.encode(p.access or {}) then
             -- new door words: swap only the two door prompts, the shell stays under everyone
             local pts = points[name]
             for i = 2, 3 do if pts[i] then pts[i]:remove() end end
             if prompt and prompt:find(name .. ':', 1, true) == 1 then prompt = nil; nui({ action = 'prompt' }) end
             local r = old
-            pts[2] = door(name .. ':in', r.door, 'Enter ' .. p.label, function() if StudioC.Move(r.out, p.exit.h, name) then setInside(name, true) end end)
+            pts[2] = door(name .. ':in', r.door, function() return StudioC.MayEnter(p) and ('Enter ' .. p.label) or ('Locked · ' .. p.label) end, function()
+                if not StudioC.MayEnter(p) then return lib.notify({ type = 'error', description = p.label .. ' is locked' }) end
+                if StudioC.Move(r.out, p.exit.h, name) then setInside(name, true) end
+            end)
             pts[3] = door(name .. ':out', r.out, 'Leave ' .. p.label, function() if StudioC.Move(r.door, (p.entrance.h + 180.0) % 360.0) then setInside(name, false) end end)
         end
         return updatePieces(name, p)

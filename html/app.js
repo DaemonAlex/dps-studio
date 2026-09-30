@@ -16,15 +16,15 @@
     shells: '<kbd>↑↓</kbd> next shell &nbsp;<kbd>← →</kbd> or drag to turn &nbsp;<kbd>Page Up / Down</kbd> tilt &nbsp;wheel zoom &nbsp;<kbd>Enter</kbd> walk inside',
     inspect: 'Hold <kbd>Middle mouse</kbd> anywhere to inspect. The last 30 are kept here.',
     spots: '<kbd>Page Up</kbd> marks a spot &nbsp;<kbd>F3</kbd> captures coords &nbsp;<kbd>Enter</kbd> open · type to search',
-    doors: '<kbd>Enter</kbd> opens the door maker &nbsp;<kbd>1-7</kbd> tabs',
+    doors: '<kbd>↑↓</kbd> move &nbsp;<kbd>Enter</kbd> open or save &nbsp;<kbd>1-7</kbd> tabs · type to search',
     history: '<kbd>↑↓</kbd> move &nbsp;<kbd>Enter</kbd> open · every change can be put back',
   };
-  const PH = { rooms: 'Search rooms…', place: 'Search furniture…', shells: 'Search shells: warehouse, office, garage…', inspect: 'Search scans…', spots: 'Search spots…', doors: '', history: 'Search history…' };
+  const PH = { rooms: 'Search rooms…', place: 'Search furniture…', shells: 'Search shells: warehouse, office, garage…', inspect: 'Search scans…', spots: 'Search spots…', doors: 'Search doors: name, job, room…', history: 'Search history…' };
 
   const S = { tab: 'rooms', boot: null, rooms: [], spots: [], hist: [], scans: [], here: null, pick: null,
               items: [], sel: -1, open: false, chip: { place: 'all', lib: 'lighting', shells: 'all', spots: 'all' }, q: {}, shellTimer: null, shown: false, pv: null,
               src: 'decorate', lib: null, bad: new Set(), more: 0, pieces: [], thumbs: {},
-              shellSrc: 'shells', ipls: null, iplStyle: {}, styling: null };
+              shellSrc: 'shells', ipls: null, iplStyle: {}, styling: null, doors: [], pickers: null, acc: {} };
   const iplLabel = (exp) => { if (/^at:/.test(exp || '')) return 'a place in the world (' + exp.slice(3) + ')'; const e = (S.ipls || []).find((x) => x.export === exp); return e ? e.label : exp; };
   const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};   // an empty Lua table arrives as []
   const styleOf = (exp) => S.iplStyle[exp] || (S.iplStyle[exp] = { preset: 'default', choice: {}, on: {} });
@@ -140,6 +140,7 @@
       case 'inspect': return S.scans.filter((s) => match(`${s.name} ${s.kind} ${s.note || ''}`));
       case 'spots': return S.spots.filter((s) => (S.chip.spots === 'all' || s.kind === S.chip.spots) && match(`${s.id} ${s.label} ${s.street} ${s.zone} ${s.by_name} ${s.kind}`));
       case 'history': return S.hist.filter((h) => match(`${h.summary} ${h.room} ${h.by_name} ${h.action}`));
+      case 'doors': return S.doors.filter((d) => match(`${d.name} ${d.id} ${d.room || ''} ${accessSummary(d.access)}`)).map((d) => Object.assign({ door: true }, d));
       default: return [];
     }
   }
@@ -180,6 +181,10 @@
       thumb = `<i class="fa-solid ${it.kind === 'pos' ? 'fa-crosshairs' : 'fa-location-dot'}"></i>`;
       nm = `#${esc(it.id)} ${esc(it.label || (it.kind === 'pos' ? 'F3 coords' : 'Spot'))}`;
       mt = `${esc([it.street, it.zone].filter(Boolean).join(' · '))}${it.street || it.zone ? ' · ' : ''}${esc(it.at)} · ${esc(it.by_name || '')}`;
+    } else if (tab === 'doors') {
+      thumb = `<i class="fa-solid ${Number(it.state) === 1 ? 'fa-lock' : 'fa-lock-open'}"></i>`;
+      nm = esc(it.name); mt = `#${it.id}${it.double ? ' · double' : ''} · ${esc(accessSummary(it.access))}${it.room ? ' · room ' + esc(it.room) : ''}`;
+      rt = `<span class="badge${Number(it.state) === 1 ? ' on' : ''}">${Number(it.state) === 1 ? 'Locked' : 'Open'}</span>`;
     } else if (tab === 'history') {
       thumb = '<i class="fa-solid fa-clock-rotate-left"></i>';
       nm = esc(it.summary); mt = `${esc(it.at)} · ${esc(it.by_name || '')} · <code>${esc(it.room)}</code>`;
@@ -204,6 +209,8 @@
         <div class="acts"><button data-a="door">Move the door to me</button><button data-a="redo">Change ${it.kind === 'ipl' ? 'interior' : 'shell'} or way out</button><button data-a="copy">Copy room to my spot</button></div>
         ${it.kind === 'ipl' ? `<p>Interior: <b>${esc(iplLabel(it.ipl))}</b> · style: ${esc(PRESET[(it.style || {}).preset] || PRESET.default)}</p><div class="acts"><button data-a="restyle">Change style</button></div>` : ''}
         <div class="acts"><button class="bad" data-a="delete">Remove room</button></div>
+        ${(() => { const key = 'room:' + it.name; if (!S.acc[key]) S.acc[key] = accCopy(it.access); return accessHtml(key, false); })()}
+        <div class="acts"><button data-a="roomAccessSave">Save who can go in${(it.doors || []).length ? ' (and its ' + it.doors.length + ' doors)' : ''}</button></div>
         <p>Last change: ${esc(it.updatedBy || '-')} · ${esc(it.updatedAt || '-')}</p></div>`;
     }
     if (tab === 'place' && it.piece) return `<div class="det"><p>This piece is lit up orange in the room.</p><div class="acts"><button class="pri" data-a="pieceMove">Move it <kbd>Enter</kbd></button><button class="bad" data-a="pieceRemove">Remove <kbd>Delete</kbd></button><button data-a="copyName">Copy name</button></div></div>`;
@@ -239,7 +246,17 @@
       const v3 = `vec3(${f2(it.x)}, ${f2(it.y)}, ${f2(it.z)})`, v4 = `vector4(${f2(it.x)}, ${f2(it.y)}, ${f2(it.z)}, ${Number(it.h || 0).toFixed(1)})`;
       return `<div class="det"><p><code>${esc(v4)}</code></p><div class="acts"><button class="pri" data-a="copyV4" data-v="${esc(v4)}">Copy vector4 <kbd>Enter</kbd></button><button data-a="copyV3" data-v="${esc(v3)}">Copy vec3</button><button data-a="spotGo">Go there</button></div></div>`;
     }
+    if (tab === 'doors') {
+      const key = 'door:' + it.id;
+      if (!S.acc[key]) S.acc[key] = accCopy(it.access);
+      return `<div class="det">${accessHtml(key, true)}
+        <span class="lbl">Settings</span>
+        <div class="chips inl"><button class="chip${Number(it.state) === 1 ? ' on' : ''}" data-a="doorLock">Locked</button><button class="chip${it.lockpick ? ' on' : ''}" data-a="doorPick">Can be lockpicked</button></div>
+        <div class="addrow"><label class="small">Locks again after (seconds, 0 = never)<input id="door-auto" type="text" value="${esc(it.autolock || 0)}"></label><label class="small">Usable from (metres)<input id="door-dist" type="text" value="${esc(it.maxDistance || 2)}"></label></div>
+        <div class="acts"><button class="pri" data-a="doorSave">Save <kbd>Enter</kbd></button><button data-a="doorGo">Go to the door</button><button class="bad" data-a="doorRemove">Remove</button></div></div>`;
+    }
     if (tab === 'history') {
+      if (/^door:/.test(it.room || '') && Number(it.has_before)) return `<div class="det"><div class="acts"><button class="pri" data-a="doorRestore">Put this door back</button></div></div>`;
       if (Number(it.has_before)) return `<div class="det"><div class="acts"><button class="pri" data-a="restore">Put the room back to before this</button></div><p>The current state is saved first, so this can be put back too.</p></div>`;
       if (!Number(it.pruned) && ['create', 'copy', 'import'].includes(it.action)) return `<div class="det"><div class="acts"><button class="pri" data-a="restore">Undo: remove the room this made</button></div><p>The room is saved first, so this can be put back too.</p></div>`;
       return `<div class="det"><p>${Number(it.pruned) ? 'This change is too old to put back. Each room keeps its last 200.' : 'Nothing to put back for this line.'}</p></div>`;
@@ -266,6 +283,7 @@
       ? `<span class="grow">${S.ipls ? S.ipls.length : 0} game interiors. Each one serves one room.</span>`
       : `<span class="grow">${S.boot ? S.boot.shells.length : 0} shells from the housing list. The one you pick floats in the sky so open shells show from every side.</span>`;
     else if (t === 'spots') h = `<span class="grow">${S.spots.length} spots, newest first.</span><button class="btn pri" data-a="markSpot">Mark my spot</button>`;
+    else if (t === 'doors') h = `<span class="grow">${S.doors.length} doors in the city's lock system.</span><button class="btn pri" data-a="doorNew">New door</button>`;
     else if (t === 'inspect') h = `<span class="grow">Hold middle mouse and aim. Close this panel first so you can look around.</span>`;
     head.innerHTML = h;
 
@@ -295,9 +313,9 @@
     renderHead();
     hint.innerHTML = HINTS[t] || '';
     document.querySelectorAll('.mode').forEach((b) => b.classList.toggle('on', b.dataset.t === t));
-    q.disabled = t === 'doors'; q.placeholder = PH[t] || '';
+    q.disabled = false; q.placeholder = PH[t] || '';
     stage.hidden = !(t === 'shells' && S.shown && S.shellSrc !== 'ipls');
-    if (t === 'doors') { list.innerHTML = doorsDoc(); S.items = []; $('#cnt').textContent = ''; return; }
+
     if (t === 'place' && S.here && (S.src === 'decorate' || S.src === 'build') && !S.lib) { renderHead(); list.innerHTML = '<div class="empty"><b>Loading the library…</b></div>'; S.items = []; return; }
     if (t === 'place' && !S.here) { renderHead(); list.innerHTML = placeEmpty(); S.items = []; $('#cnt').textContent = ''; return; }
     S.items = itemsFor(t);
@@ -350,10 +368,12 @@
   /* ---------- loading ---------- */
   function load(tab) {
     const t = tab || S.tab;
+    if (t === 'rooms') loadPickers();
     if (t === 'rooms' || t === 'place' || t === 'shells') {
       if (t === 'place' && S.src === 'pieces') loadPieces();
       return post('rooms').then((r) => { S.rooms = Array.isArray(r) ? r : []; if (S.tab === t) render(true); });
     }
+    if (t === 'doors') return Promise.all([loadPickers(), post('doorsList')]).then(([, r]) => { S.doors = Array.isArray(r) ? r : []; if (S.tab === t) render(true); });
     if (t === 'spots') return post('spots').then((r) => { S.spots = Array.isArray(r) ? r : []; if (S.tab === t) render(true); });
     if (t === 'history') return post('history').then((r) => { S.hist = Array.isArray(r) ? r : []; if (S.tab === t) render(true); });
     if (t === 'inspect') return post('scans').then((r) => { S.scans = Array.isArray(r) ? r : []; if (S.tab === t) render(true); });
@@ -397,6 +417,83 @@
     img.onerror = () => post('cropDone', { model, b64: false });
     img.src = dataUri;
   }
+  /* ---------- who can go in: one editor for doors, rooms and new rooms ---------- */
+  const accCopy = (a) => {
+    a = obj(a);
+    return { open: a.open !== false && !(a.staff || Object.keys(obj(a.groups)).length || (a.items || []).length || (a.characters || []).length || a.passcode),
+             staff: !!a.staff, groups: Object.assign({}, obj(a.groups)), items: Array.isArray(a.items) ? a.items.slice() : [],
+             characters: Array.isArray(a.characters) ? a.characters.slice() : [], passcode: a.passcode || '' };
+  };
+  const pickLabel = (name) => { const j = S.pickers && S.pickers.jobs.find((x) => x.name === name); return j ? j.label : name; };
+  const itemLabel = (name) => { const i = S.pickers && S.pickers.items.find((x) => x.name === name); return i ? i.label : name; };
+  function accessSummary(a) {
+    a = obj(a);
+    if (a.open !== false && !(a.staff || Object.keys(obj(a.groups)).length || (a.items || []).length || (a.characters || []).length)) return 'Everyone';
+    const parts = [];
+    Object.keys(obj(a.groups)).forEach((g) => parts.push(`${pickLabel(g)} ${a.groups[g]}+`));
+    (a.items || []).forEach((i) => parts.push('key: ' + itemLabel(i)));
+    if ((a.characters || []).length) parts.push(a.characters.length + ' named');
+    if (a.staff) parts.push('staff');
+    return parts.join(', ') || 'Locked to everyone';
+  }
+  function accessHtml(key, withPasscode) {
+    const a = S.acc[key];
+    const jobs = (S.pickers && S.pickers.jobs) || [], items = (S.pickers && S.pickers.items) || [];
+    let h = `<span class="lbl">Who can go in</span><div class="chips inl">
+      <button class="chip${a.open ? ' on' : ''}" data-a="accOpen" data-k="${esc(key)}">Everyone</button>
+      <button class="chip${!a.open ? ' on' : ''}" data-a="accLimit" data-k="${esc(key)}">Only some people</button></div>`;
+    if (a.open) return h;
+    const rows = Object.keys(a.groups).map((g) => {
+      const j = jobs.find((x) => x.name === g);
+      const opts = (j ? j.grades : [{ level: a.groups[g], name: '' }]).map((gr) => `<option value="${gr.level}"${gr.level === a.groups[g] ? ' selected' : ''}>${gr.level}${gr.name ? ' · ' + esc(gr.name) : ''} and up</option>`).join('');
+      return `<div class="look"><span class="ln">${esc(pickLabel(g))}<small>${esc(g)}</small></span><select class="sel" data-a="accGrade" data-k="${esc(key)}" data-g="${esc(g)}">${opts}</select><button data-a="accDelGroup" data-k="${esc(key)}" data-g="${esc(g)}">Remove</button></div>`;
+    }).join('');
+    h += `<span class="lbl">Jobs and gangs</span><div class="looks">${rows}</div>
+      <div class="addrow"><input list="dl-jobs" id="acc-job-${esc(key)}" placeholder="Type a job or gang, then Add"><button class="btn" data-a="accAddGroup" data-k="${esc(key)}">Add</button></div>
+      <datalist id="dl-jobs">${jobs.map((j) => `<option value="${esc(j.name)}">${esc(j.label)} (${j.kind})</option>`).join('')}</datalist>`;
+    h += `<span class="lbl">Key items</span><div class="chips inl">${a.items.map((i) => `<button class="chip on" data-a="accDelItem" data-k="${esc(key)}" data-i="${esc(i)}">${esc(itemLabel(i))} ✕</button>`).join('') || '<span class="hint2">None</span>'}</div>
+      <div class="addrow"><input list="dl-items" id="acc-item-${esc(key)}" placeholder="Type an item, then Add"><button class="btn" data-a="accAddItem" data-k="${esc(key)}">Add</button></div>
+      <datalist id="dl-items">${items.map((i) => `<option value="${esc(i.name)}">${esc(i.label)}</option>`).join('')}</datalist>`;
+    h += `<span class="lbl">Named people (citizen IDs, with commas)</span><div class="addrow"><input id="acc-chars-${esc(key)}" value="${esc(a.characters.join(', '))}" placeholder="ABC12345, XYZ67890" data-a2="accChars" data-k="${esc(key)}"></div>`;
+    h += `<div class="chips inl"><button class="chip${a.staff ? ' on' : ''}" data-a="accStaff" data-k="${esc(key)}">Staff can always go in</button></div>`;
+    if (withPasscode) h += `<span class="lbl">Passcode (optional, letters and numbers)</span><div class="addrow"><input id="acc-pass-${esc(key)}" value="${esc(a.passcode)}" maxlength="12" data-a2="accPass" data-k="${esc(key)}"></div>`;
+    return h;
+  }
+  function readAccessInputs(key) {
+    const a = S.acc[key]; if (!a) return;
+    const c = document.getElementById('acc-chars-' + key); if (c) a.characters = c.value.split(',').map((x) => x.trim()).filter(Boolean);
+    const pw = document.getElementById('acc-pass-' + key); if (pw) a.passcode = pw.value.trim();
+  }
+  function accessOut(key) { readAccessInputs(key); const a = S.acc[key]; return a.open ? { open: true } : { open: false, staff: a.staff, groups: a.groups, items: a.items, characters: a.characters, passcode: a.passcode || undefined }; }
+  function loadPickers() {
+    if (S.pickers && S.pickers.jobs.length && S.pickers.items.length) return Promise.resolve();   // retry until both lists loaded
+    return post('doorPickers').then((r) => { S.pickers = { jobs: Array.isArray(r && r.jobs) ? r.jobs : [], items: Array.isArray(r && r.items) ? r.items : [] }; });
+  }
+  // keep what was typed (citizen IDs, passcode, and the door number boxes) before a redraw
+  function keepTyped(key, it) {
+    readAccessInputs(key);
+    if (it && it.door) {
+      const auto = document.getElementById('door-auto'), dist = document.getElementById('door-dist');
+      if (auto) it.autolock = Number(auto.value) || 0;
+      if (dist) it.maxDistance = Number(dist.value) || 2;
+      const orig = S.doors.find((d) => d.id === it.id);
+      if (orig) { orig.state = it.state; orig.lockpick = it.lockpick; orig.autolock = it.autolock; orig.maxDistance = it.maxDistance; }
+    }
+  }
+  function rerenderAccess(key) {
+    if (key === 'new') { const box = document.getElementById('acc-modal'); if (box) box.innerHTML = accessHtml('new', false); return; }
+    select(S.sel, true, true);
+  }
+  function askAccess(title) {
+    return new Promise((resolve) => {
+      modal.innerHTML = `<div class="form"><h4>${esc(title)}</h4><p>You can change this any time from the room.</p><div id="acc-modal">${accessHtml('new', false)}</div>
+        <div class="row2"><button class="btn" id="fno">Cancel</button><button class="btn pri" id="fyes">Next</button></div></div>`;
+      modal.hidden = false;
+      const done = (v) => { modal.hidden = true; modal.innerHTML = ''; list.focus(); resolve(v); };
+      modal.querySelector('#fno').onclick = () => done(null);
+      modal.querySelector('#fyes').onclick = () => done(accessOut('new'));
+    });
+  }
   function loadPieces() {
     return post('pieces').then((r) => { S.pieces = (r && r.ok && Array.isArray(r.pieces)) ? r.pieces : []; if (S.tab === 'place' && S.src === 'pieces') render(true); });
   }
@@ -425,7 +522,11 @@
         const v = await ask('New room at my spot', 'Stand at the door, facing it. Then pick a shell and mark the way out inside.', [
           { label: 'Short name (for commands and history)', ph: 'greenroom', max: 32 }, { label: 'Door words players read', ph: 'Green Room', max: 40 }], 'Pick a shell');
         if (!v) return;
-        const r = await post('roomNew', { name: v[0], label: v[1] });
+        await loadPickers();
+        S.acc.new = accCopy({ open: true });
+        const acc = await askAccess(`Who can go in to ${v[1]}?`);
+        if (!acc) return;
+        const r = await post('roomNew', { name: v[0], label: v[1], access: acc });
         if (!result(r)) return;
         S.pick = { name: v[0], label: v[1] }; setTab('shells'); return;
       }
@@ -471,6 +572,49 @@
         post('roomDelete', { name: it.name }).then((r) => { if (result(r, 'Removed')) load(); }); return;
       }
       case 'edit': case 'showPieces': setSrc('pieces'); return;
+      case 'accOpen': case 'accLimit': { const k = el.dataset.k; keepTyped(k, it); S.acc[k].open = a === 'accOpen'; rerenderAccess(k); return; }
+      case 'accStaff': { const k = el.dataset.k; keepTyped(k, it); S.acc[k].staff = !S.acc[k].staff; rerenderAccess(k); return; }
+      case 'accAddGroup': {
+        const k = el.dataset.k, inp = document.getElementById('acc-job-' + k), v = inp ? inp.value.trim() : '';
+        let j = S.pickers && S.pickers.jobs.find((x) => x.name === v || x.label.toLowerCase() === v.toLowerCase());
+        if (!j && (!S.pickers || !S.pickers.jobs.length) && /^[\w-]+$/.test(v)) j = { name: v, grades: [{ level: 0 }] };   // list did not load: take the typed name
+        if (!j) { toast('Pick a job or gang from the list', true); return; }
+        keepTyped(k, it); S.acc[k].groups[j.name] = (j.grades[0] || { level: 0 }).level; rerenderAccess(k); return;
+      }
+      case 'accDelGroup': { const k = el.dataset.k; keepTyped(k, it); delete S.acc[k].groups[el.dataset.g]; rerenderAccess(k); return; }
+      case 'accAddItem': {
+        const k = el.dataset.k, inp = document.getElementById('acc-item-' + k), v = inp ? inp.value.trim() : '';
+        let i = S.pickers && S.pickers.items.find((x) => x.name === v || x.label.toLowerCase() === v.toLowerCase());
+        if (!i && (!S.pickers || !S.pickers.items.length) && /^[\w-]+$/.test(v)) i = { name: v };
+        if (!i) { toast('Pick an item from the list', true); return; }
+        keepTyped(k, it); if (!S.acc[k].items.includes(i.name)) S.acc[k].items.push(i.name); rerenderAccess(k); return;
+      }
+      case 'accDelItem': { const k = el.dataset.k; keepTyped(k, it); S.acc[k].items = S.acc[k].items.filter((x) => x !== el.dataset.i); rerenderAccess(k); return; }
+      case 'doorLock': if (it && it.door) { keepTyped('door:' + it.id, it); it.state = Number(it.state) === 1 ? 0 : 1; keepTyped('door:' + it.id, it); select(S.sel, true, true); } return;
+      case 'doorPick': if (it && it.door) { keepTyped('door:' + it.id, it); it.lockpick = !it.lockpick; keepTyped('door:' + it.id, it); select(S.sel, true, true); } return;
+      case 'doorSave': {
+        if (!it || !it.door) return;
+        const auto = document.getElementById('door-auto'), dist = document.getElementById('door-dist');
+        const f = { access: accessOut('door:' + it.id), state: Number(it.state) === 1, lockpick: !!it.lockpick,
+                    autolock: auto ? Number(auto.value) || 0 : undefined, maxDistance: dist ? Number(dist.value) || 2 : undefined };
+        post('doorSave', { id: it.id, f }).then((r) => { if (result(r, 'Door saved')) { delete S.acc['door:' + it.id]; load('doors'); } }); return;
+      }
+      case 'doorGo': if (it && it.door && it.coords) post('doorGo', it.coords); return;
+      case 'doorRemove': {
+        if (!it || !it.door) return;
+        if (!await confirmBox('Remove door', `${it.name} leaves the lock system. A copy is kept in History, so it can be put back.`, 'Remove')) return;
+        post('doorRemove', { id: it.id }).then((r) => { if (result(r, 'Removed. History can put it back.')) setTimeout(() => load('doors'), 400); }); return;
+      }
+      case 'doorNew': {
+        const v = await ask('New door', 'Name it, then look at the door in the game and left click it. Set who can open it afterwards, here in Doors.', [{ label: 'Door name', ph: 'City Hall front', max: 40 }], 'Pick the door');
+        if (!v) return;
+        post('doorNew', { name: v[0], access: { open: true }, locked: false }).then((r) => result(r)); return;
+      }
+      case 'doorRestore': if (it) post('doorRestore', { id: it.id }).then((r) => { if (result(r, 'Door put back')) load(); }); return;
+      case 'roomAccessSave': {
+        if (!it || !it.name) return;
+        post('roomAccess', { name: it.name, access: accessOut('room:' + it.name) }).then((r) => { if (result(r, 'Saved')) { delete S.acc['room:' + it.name]; load(); } }); return;
+      }
       case 'useShell': S.shellSrc = 'shells'; setTab('shells'); return;
       case 'useIpl': S.shellSrc = 'ipls'; post('previewStop'); S.pv = null; setTab('shells'); return;
       case 'usePlace': post('placeWalk').then((r) => result(r)); return;
@@ -540,7 +684,8 @@
 
   /* ---------- events ---------- */
   document.addEventListener('click', (e) => {
-    const b = e.target.closest('[data-a]'); if (b && !modal.contains(b)) { e.stopPropagation(); act(b.dataset.a, b); return; }
+    const b = e.target.closest('[data-a]');
+    if (b && (!modal.contains(b) || /^acc/.test(b.dataset.a))) { e.stopPropagation(); act(b.dataset.a, b); return; }
     const tbtn = e.target.closest('.mode'); if (tbtn) { setTab(tbtn.dataset.t); return; }
     const c = e.target.closest('.chip'); if (c && chips.contains(c)) {
       if (c.dataset.s) { setSrc(c.dataset.s); return; }
@@ -549,6 +694,10 @@
       S.chip[S.tab === 'place' && S.src !== 'housing' ? 'lib' : S.tab] = c.dataset.c; render(false); return;
     }
     const r = e.target.closest('.row'); if (r && list.contains(r) && !e.target.closest('.det')) { const i = +r.dataset.i; select(i, i === S.sel ? !S.open : true); }
+  });
+  document.addEventListener('change', (e) => {
+    const sel = e.target.closest('select[data-a="accGrade"]'); if (!sel) return;
+    const k = sel.dataset.k; if (S.acc[k]) S.acc[k].groups[sel.dataset.g] = Number(sel.value) || 0;
   });
   list.addEventListener('dblclick', (e) => { const r = e.target.closest('.row'); if (r && !e.target.closest('.det')) primary(); });
   list.addEventListener('error', (e) => { if (e.target.tagName === 'IMG') e.target.parentNode.innerHTML = '<i class="fa-solid fa-couch"></i>'; }, true);
@@ -567,13 +716,16 @@
     if (t === 'spots') { const it = S.items[S.sel]; if (it) copy(`vector4(${f2(it.x)}, ${f2(it.y)}, ${f2(it.z)}, ${Number(it.h || 0).toFixed(1)})`); return; }
     if (t === 'history') return select(S.sel, true);
     if (t === 'inspect') return act('copyName');
-    if (t === 'doors') return act('doors');
+    if (t === 'doors') return S.open ? act('doorSave') : select(S.sel, true);
   }
 
   document.addEventListener('keydown', (e) => {
     if (app.hidden) return;
     if (!modal.hidden) { if (e.key === 'Escape') { e.preventDefault(); modal.querySelector('#fno') && modal.querySelector('#fno').click(); } return; }
-    const typing = document.activeElement === q;
+    const ae = document.activeElement;
+    const inBox = ae && ae !== q && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName);
+    if (inBox) { if (e.key === 'Escape') { e.preventDefault(); ae.blur(); } return; }   // typing in a form box stays in the box
+    const typing = ae === q;
     const onButton = document.activeElement && document.activeElement.tagName === 'BUTTON';
     if (e.key === 'Escape') { e.preventDefault(); if (typing && q.value) { q.value = ''; render(false); } else post('close'); return; }
     if (onButton && (e.key === 'Enter' || e.key === ' ')) return;   // a focused button presses itself
@@ -644,7 +796,7 @@
   function showPrompt(m) {
     const p = $('#prompt');
     if (!m.text) { p.hidden = true; return; }
-    p.innerHTML = `<kbd>${esc(m.key || 'E')}</kbd><span>${esc(m.text)}</span>`; p.hidden = false;
+    p.innerHTML = `${m.key === '' ? '<i class="fa-solid fa-lock"></i>' : `<kbd>${esc(m.key || 'E')}</kbd>`}<span>${esc(m.text)}</span>`; p.hidden = false;
   }
   let cardT;
   function showCard(html, ms) {

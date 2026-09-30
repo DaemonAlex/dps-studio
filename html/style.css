@@ -131,3 +131,10 @@ button:focus-visible,.chip:focus-visible,.mode:focus-visible{outline:2px solid v
 .chips .brk{flex-basis:100%;height:0}
 .chips .hint2{font-size:11px;color:var(--cd-dim);padding:2px 4px}
 .chips.inl{padding:0;border:0;background:transparent;max-height:none}
+.addrow{display:flex;gap:6px;align-items:flex-end;flex-wrap:wrap}
+.addrow input,.addrow select,.sel{background:var(--cd-deep);border:1px solid var(--cd-border);border-radius:8px;color:var(--cd-ink);padding:7px 9px;font:13px Roboto,sans-serif;min-width:0;flex:1}
+.addrow input:focus,.sel:focus{outline:0;border-color:var(--cd-sun)}
+.addrow label.small{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--cd-dim);flex:1;min-width:140px}
+.sel{flex:0 0 auto;max-width:180px}
+#acc-modal{display:flex;flex-direction:column;gap:8px;max-height:52vh;overflow-y:auto}
+#prompt i.fa-lock{color:var(--cd-sun);font-size:16px;width:28px;text-align:center}

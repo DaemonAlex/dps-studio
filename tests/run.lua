@@ -125,6 +125,23 @@ check('place key: accepted shape only', Studio.IsPlaceKey('at:-1012,-478,50') an
 local proom = Studio.NewIplRoom('movie', 'Movie Office', 'at:-1012,-478,50', { x = 1, y = 2, z = 3, h = 0 }, { x = -1011.6, y = -478.2, z = 50.4, h = 0 }, nil)
 check('place room: clean passes without being in the interior list', Studio.CleanRoom(Studio.Copy(proom), {}, nil, {}) ~= nil)
 
+-- door and room access
+local acc = Studio.CleanAccess({ groups = { police = 0, bcso = '2', ['bad job!'] = 1 }, items = { 'keycard', 'no good!' }, characters = { 'ABC123' }, passcode = '1234' })
+check('access: good parts kept, bad parts dropped', acc.groups.police == 0 and acc.groups.bcso == 2 and acc.groups['bad job!'] == nil and #acc.items == 1 and acc.characters[1] == 'ABC123' and acc.passcode == '1234')
+check('access: nothing given means open', Studio.CleanAccess(nil).open == true)
+local ox = Studio.AccessToOx(acc)
+check('access to ox: fields filled', ox.groups.police == 0 and ox.items[1] == 'keycard' and ox.passcode == '1234')
+local oxo = Studio.AccessToOx({ open = true })
+check('access to ox: open clears every field', oxo.groups == '' and oxo.items == '' and oxo.characters == '' and oxo.passcode == '')
+check('access to ox: empty lists clear', Studio.AccessToOx({ groups = {} }).groups == '')
+local who = { job = 'bcso', grade = 3, citizenid = 'XYZ', has = function(i) return i == 'keycard' end }
+check('allows: job at or above the grade', Studio.AccessAllows(acc, who))
+check('allows: job below the grade refused', not Studio.AccessAllows({ groups = { bcso = 4 } }, who))
+check('allows: key item', Studio.AccessAllows({ items = { 'keycard' } }, { has = function(i) return i == 'keycard' end }))
+check('allows: named character', Studio.AccessAllows({ characters = { 'XYZ' } }, { citizenid = 'XYZ' }))
+check('allows: staff only lets staff in, no one else', Studio.AccessAllows({ staff = true }, { staff = true }) and not Studio.AccessAllows({ staff = true }, { job = 'police' }))
+check('allows: gang grade', Studio.AccessAllows({ groups = { ballas = 1 } }, { gang = 'ballas', gangGrade = 2 }))
+
 -- old files
 local s = Studio.ParseSpotLine('210 | 2026-09-30 07:21:11 | Schtoop | greenroom | vec3(690.36, 588.38, 131.06) | heading 343.8 | no prop within 6m | Marlowe Dr | Vinewood Hills')
 check('spot line: parsed', s and s.label == 'greenroom' and s.x == 690.36 and s.h == 343.8 and s.street == 'Marlowe Dr' and s.zone == 'Vinewood Hills' and s.propHash == nil)

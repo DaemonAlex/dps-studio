@@ -93,6 +93,12 @@ local TABLES = {
         url VARCHAR(400) NOT NULL,
         at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         PRIMARY KEY (model))]],
+    [[CREATE TABLE IF NOT EXISTS dps_studio_doors (
+        id INT NOT NULL,
+        staff TINYINT NOT NULL DEFAULT 0,
+        open TINYINT NOT NULL DEFAULT 0,
+        room VARCHAR(32) DEFAULT NULL,
+        PRIMARY KEY (id))]],
     [[CREATE TABLE IF NOT EXISTS dps_studio_meta (
         k VARCHAR(40) NOT NULL, v VARCHAR(200) DEFAULT NULL, PRIMARY KEY (k))]],
 }
@@ -213,6 +219,7 @@ end
 
 CreateThread(function()
     for _, q in ipairs(TABLES) do MySQL.query.await(q) end
+    MySQL.query.await('ALTER TABLE dps_studio_doors ADD COLUMN IF NOT EXISTS open TINYINT NOT NULL DEFAULT 0')
     MySQL.query.await('ALTER TABLE dps_studio_history ADD COLUMN IF NOT EXISTS pruned TINYINT NOT NULL DEFAULT 0')
     loadShells()
     for _, row in ipairs(MySQL.query.await('SELECT name, data FROM dps_studio_rooms') or {}) do
@@ -301,6 +308,8 @@ lib.callback.register('dps-studio:roomCreate', function(src, d)
                 room.looks, room.look, room.nextLook = old.looks, old.look, old.nextLook
                 Studio.ActiveLook(room).style = Studio.CleanStyle(d.style)
             end
+            room.access = Studio.CleanAccess(d.access or (old and old.access))
+            room.doors = old and old.doors or nil
             rooms[name] = room
             return true
         end)
@@ -316,6 +325,8 @@ lib.callback.register('dps-studio:roomCreate', function(src, d)
         if old and old.shell == d.shell then           -- same shell: every look survives
             room.looks, room.look, room.nextLook = old.looks, old.look, old.nextLook
         end
+        room.access = Studio.CleanAccess(d.access or (old and old.access))
+        room.doors = old and old.doors or nil
         rooms[name] = room
         return true
     end)
@@ -585,4 +596,253 @@ lib.callback.register('dps-studio:thumbSave', function(src, model, b64)
     thumbs[model] = url
     MySQL.query.await('INSERT INTO dps_studio_thumbs (model, url) VALUES (?, ?) ON DUPLICATE KEY UPDATE url = VALUES(url)', { model, url })
     return true, url
+end)
+
+
+-- ---------------------------------------------------------------- admin: doors (ox_doorlock)
+-- ox_doorlock stays the lock engine for every door in the city. Studio is the door maker:
+-- it lists doors from ox_doorlock's own table, edits them with ox_doorlock's editDoor export,
+-- and (from the admin's game) creates and removes them with ox_doorlock's own admin event.
+-- "Staff only" is answered through ox_doorlock's doorAuthorization hook: no permissions change.
+local staffDoors, openDoors, doorRoom = {}, {}, {}   -- ox door id -> true / true / room name
+
+local function loadDoorMarks()
+    staffDoors, openDoors, doorRoom = {}, {}, {}
+    for _, r in ipairs(MySQL.query.await('SELECT id, staff, open, room FROM dps_studio_doors') or {}) do
+        if tonumber(r.staff) == 1 then staffDoors[r.id] = true end
+        if tonumber(r.open) == 1 then openDoors[r.id] = true end
+        if r.room then doorRoom[r.id] = r.room end
+    end
+end
+
+-- ox_doorlock asks every hook on each use: an "Everyone" door lets anyone lock or unlock it (a door
+-- with no access in ox_doorlock would otherwise be usable by no one); a staff door lets admins.
+local function registerDoorHook()
+    if GetResourceState('ox_doorlock') ~= 'started' then return end
+    exports.ox_doorlock:registerHook('doorAuthorization', function(p)
+        if not (p and p.door) then return end
+        if openDoors[p.door.id] then return true end
+        if staffDoors[p.door.id] and allowed(p.source) then return true end
+    end)
+end
+
+CreateThread(function()
+    while not ready do Wait(500) end
+    loadDoorMarks()
+    registerDoorHook()
+end)
+
+AddEventHandler('onResourceStart', function(res)
+    if res == 'ox_doorlock' and ready then registerDoorHook() end
+end)
+
+local function doorAllowed(src) return allowed(src) and IsPlayerAceAllowed(src, 'command.doorlock') end
+
+local function doorRows()
+    local out = {}
+    for _, r in ipairs(MySQL.query.await('SELECT id, name, data FROM ox_doorlock ORDER BY id') or {}) do
+        local ok, d = pcall(json.decode, r.data or '{}')
+        if ok and type(d) == 'table' then
+            out[#out + 1] = {
+                id = r.id, name = r.name, state = d.state, coords = d.coords, double = type(d.doors) == 'table',
+                access = Studio.CleanAccess({ groups = d.groups, items = type(d.items) == 'table' and (function()
+                    local t = {}
+                    for _, it in ipairs(d.items) do t[#t + 1] = type(it) == 'table' and it.name or it end
+                    return t
+                end)() or nil, characters = d.characters, staff = staffDoors[r.id], passcode = d.passcode,
+                open = openDoors[r.id] == true or not (d.groups or d.items or d.characters or d.passcode or staffDoors[r.id]) }),
+                autolock = d.autolock, lockpick = d.lockpick == true,
+                maxDistance = d.maxDistance, room = doorRoom[r.id],
+            }
+        end
+    end
+    return out
+end
+
+local function doorRaw(id)
+    return MySQL.single.await('SELECT id, name, data FROM ox_doorlock WHERE id = ?', { id })
+end
+
+local function doorHistory(src, id, action, summary, before)
+    MySQL.insert.await('INSERT INTO dps_studio_history (by_name, action, room, summary, before_data) VALUES (?, ?, ?, ?, ?)',
+        { who(src), action, ('door:%d'):format(id), summary:sub(1, 200), before and json.encode(before) or nil })
+    lib.print.info(('%s: %s'):format(who(src), summary))
+end
+
+local function markDoor(id, staff, room, open)
+    MySQL.query.await('INSERT INTO dps_studio_doors (id, staff, open, room) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE staff = VALUES(staff), open = VALUES(open), room = COALESCE(VALUES(room), room)',
+        { id, staff and 1 or 0, open and 1 or 0, room })
+    staffDoors[id] = staff or nil
+    openDoors[id] = open or nil
+    if room then doorRoom[id] = room end
+end
+
+local function unmarkDoor(id)
+    MySQL.query.await('DELETE FROM dps_studio_doors WHERE id = ?', { id })
+    staffDoors[id], openDoors[id], doorRoom[id] = nil, nil, nil
+end
+
+local pickers
+lib.callback.register('dps-studio:doorPickers', function(src)
+    if not allowed(src) then return nil end
+    if not pickers then
+        local jobs, items = {}, {}
+        local function addGroups(list, kind)
+            for name, g in pairs(list or {}) do
+                local grades = {}
+                for lvl, gr in pairs(type(g.grades) == 'table' and g.grades or {}) do
+                    grades[#grades + 1] = { level = tonumber(lvl) or 0, name = type(gr) == 'table' and gr.name or tostring(gr) }
+                end
+                table.sort(grades, function(a, b) return a.level < b.level end)
+                jobs[#jobs + 1] = { name = name, label = g.label or name, kind = kind, grades = grades }
+            end
+        end
+        pcall(function() addGroups(exports.qbx_core:GetJobs(), 'job') end)
+        pcall(function() addGroups(exports.qbx_core:GetGangs(), 'gang') end)
+        table.sort(jobs, function(a, b) return a.label:lower() < b.label:lower() end)
+        pcall(function()
+            for name, it in pairs(exports.ox_inventory:Items() or {}) do items[#items + 1] = { name = name, label = it.label or name } end
+        end)
+        table.sort(items, function(a, b) return a.label:lower() < b.label:lower() end)
+        if #jobs > 0 and #items > 0 then pickers = { jobs = jobs, items = items } end   -- keep only a full load
+        return { jobs = jobs, items = items }
+    end
+    return pickers
+end)
+
+lib.callback.register('dps-studio:doors', function(src)
+    if not allowed(src) then return nil end
+    return doorRows()
+end)
+
+---Saves changes to one door. f = { name?, state?, access?, autolock?, lockpick?, maxDistance? }
+local function saveDoor(src, id, f, why)
+    local raw = doorRaw(id)
+    if not raw then return false, 'That door is gone' end
+    local fields = {}
+    if f.access ~= nil then
+        local a = Studio.CleanAccess(f.access)
+        for k, v in pairs(Studio.AccessToOx(a)) do fields[k] = v end
+        -- keep key item settings (single use, metadata) when the item names did not change
+        local okR, old = pcall(json.decode, raw.data or '{}')
+        if okR and type(old) == 'table' and type(old.items) == 'table' and type(fields.items) == 'table' then
+            local oldNames, newNames = {}, {}
+            for _, it in ipairs(old.items) do oldNames[#oldNames + 1] = type(it) == 'table' and it.name or it end
+            for _, it in ipairs(fields.items) do newNames[#newNames + 1] = it end
+            table.sort(oldNames); table.sort(newNames)
+            if table.concat(oldNames, ',') == table.concat(newNames, ',') then fields.items = old.items end
+        end
+        markDoor(id, a.staff and not a.open, nil, a.open)
+    end
+    if f.name ~= nil then
+        local n = Studio.CleanLabel(f.name, 40)
+        if not n then return false, 'Door name: 1 to 40 letters' end
+        fields.name = n
+    end
+    if f.state ~= nil then fields.state = f.state and 1 or 0 end
+    if f.autolock ~= nil then
+        local t = tonumber(f.autolock)
+        fields.autolock = (t and t > 0) and math.floor(math.min(3600, t)) or ''
+    end
+    if f.lockpick ~= nil then fields.lockpick = f.lockpick == true end
+    if f.maxDistance ~= nil then
+        local d = tonumber(f.maxDistance)
+        if d then fields.maxDistance = math.max(1.0, math.min(10.0, d)) + 0.0 end
+    end
+    local ok, err = pcall(function() exports.ox_doorlock:editDoor(id, fields) end)
+    if not ok then return false, 'ox_doorlock refused the change: ' .. tostring(err):sub(1, 120) end
+    doorHistory(src, id, 'door', ('%s door %s'):format(why or 'Changed', fields.name or raw.name), raw)
+    return true
+end
+
+lib.callback.register('dps-studio:doorSave', function(src, id, f)
+    if not allowed(src) then return false, 'Studio is for admins' end
+    if type(id) ~= 'number' or type(f) ~= 'table' then return false, 'Bad data' end
+    return saveDoor(src, id, f)
+end)
+
+-- Called from the admin's game right after it asked ox_doorlock to create a door by name.
+lib.callback.register('dps-studio:doorMaxId', function(src)
+    if not doorAllowed(src) then return false, 'Making doors needs the door permission (command.doorlock)' end
+    return true, MySQL.scalar.await('SELECT COALESCE(MAX(id), 0) FROM ox_doorlock') or 0
+end)
+
+lib.callback.register('dps-studio:doorCreated', function(src, name, access, room, afterId)
+    if not doorAllowed(src) or type(name) ~= 'string' then return false, 'Making doors needs the door permission (command.doorlock)' end
+    local door
+    for _ = 1, 30 do
+        -- only a door saved after this request counts, so an older door with the same name never matches
+        local id = MySQL.scalar.await('SELECT id FROM ox_doorlock WHERE name = ? AND id > ? ORDER BY id DESC LIMIT 1', { name, tonumber(afterId) or 0 })
+        if id then door = { id = id } break end
+        Wait(100)
+    end
+    if not door then return false, 'ox_doorlock did not save the door' end
+    local a = Studio.CleanAccess(access)
+    markDoor(door.id, a.staff and not a.open, type(room) == 'string' and rooms[room] and room or nil, a.open)
+    if type(room) == 'string' and rooms[room] then
+        change(src, room, 'doors', ('Added door %s to %s'):format(name, rooms[room].label), function()
+            rooms[room].doors = rooms[room].doors or {}
+            table.insert(rooms[room].doors, door.id)
+            return true
+        end)
+    end
+    doorHistory(src, door.id, 'door-create', ('Made door %s'):format(name), nil)
+    return true, door.id
+end)
+
+-- Before the admin's game removes a door, keep a full copy so History can put it back.
+lib.callback.register('dps-studio:doorBeforeRemove', function(src, id)
+    if not doorAllowed(src) then return false, 'Removing doors needs the door permission (command.doorlock)' end
+    if type(id) ~= 'number' then return false end
+    local raw = doorRaw(id)
+    if not raw then return false, 'That door is gone' end
+    raw.marks = { staff = staffDoors[id] == true, open = openDoors[id] == true, room = doorRoom[id] }
+    doorHistory(src, id, 'door-remove', ('Removed door %s (put it back from History)'):format(raw.name), raw)
+    local room = doorRoom[id]
+    if room and rooms[room] and rooms[room].doors then
+        change(src, room, 'doors', ('Removed door %s from %s'):format(raw.name, rooms[room].label), function()
+            for i, d in ipairs(rooms[room].doors) do if d == id then table.remove(rooms[room].doors, i) break end end
+            return true
+        end)
+    end
+    unmarkDoor(id)
+    return true
+end)
+
+-- History for a door line: returns the saved copy. The admin's game recreates it when it is gone.
+lib.callback.register('dps-studio:doorRestore', function(src, historyId)
+    if not allowed(src) then return false end
+    local row = type(historyId) == 'number' and MySQL.single.await('SELECT room, before_data FROM dps_studio_history WHERE id = ?', { historyId })
+    if not row or not row.before_data then return false, 'Nothing to put back for this line' end
+    local ok, raw = pcall(json.decode, row.before_data)
+    if not ok or type(raw) ~= 'table' then return false, 'That copy cannot be read' end
+    local id = tonumber(tostring(row.room):match('^door:(%d+)$'))
+    local ok2, data = pcall(json.decode, raw.data or '{}')
+    if not ok2 or type(data) ~= 'table' then return false, 'That copy cannot be read' end
+    if id and doorRaw(id) then
+        local fields = { name = raw.name, state = data.state, groups = data.groups or '', items = data.items or '',
+                         characters = data.characters or '', passcode = data.passcode or '', autolock = data.autolock or '',
+                         lockpick = data.lockpick == true, maxDistance = data.maxDistance }
+        local okE, err = pcall(function() exports.ox_doorlock:editDoor(id, fields) end)
+        if not okE then return false, tostring(err):sub(1, 120) end
+        doorHistory(src, id, 'door', ('Put door %s back'):format(raw.name), nil)
+        return true
+    end
+    data.name = raw.name
+    return true, { recreate = data, marks = raw.marks }
+end)
+
+-- Change who may open every door of a server location at once (and its Studio door).
+lib.callback.register('dps-studio:roomAccess', function(src, name, access)
+    if not allowed(src) then return false, 'Studio is for admins' end
+    local room = rooms[name]
+    if not room then return false, 'No room with that name' end
+    local a = Studio.CleanAccess(access)
+    local okAll = change(src, name, 'access', ('New access for %s'):format(room.label), function()
+        room.access = a
+        return true
+    end)
+    if not okAll then return false, 'Not saved' end
+    for _, id in ipairs(room.doors or {}) do saveDoor(src, id, { access = a }, 'Access for') end
+    return true
 end)
