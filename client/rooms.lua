@@ -188,14 +188,8 @@ local function addRoom(p, respawn)
             onEnter = function() CreateThread(function() StudioC.SpawnRoom(name) end) end,   -- never stall the points loop
             onExit = function() despawn(name) end,
         }),
-        door(name .. ':in', doorPos, 'Enter ' .. p.label, function() StudioC.Move(out, p.exit.h, name) end),
-        door(name .. ':out', out, 'Leave ' .. p.label, function() StudioC.Move(doorPos, (p.entrance.h + 180.0) % 360.0) end),
-        lib.points.new({   -- inside the room: 45 m round the shell, well short of the door 60 m above
-            coords = shellPos,
-            distance = 45.0,
-            onEnter = function() setInside(name, true) end,
-            onExit = function() setInside(name, false) end,
-        }),
+        door(name .. ':in', doorPos, 'Enter ' .. p.label, function() if StudioC.Move(out, p.exit.h, name) then setInside(name, true) end end),
+        door(name .. ':out', out, 'Leave ' .. p.label, function() if StudioC.Move(doorPos, (p.entrance.h + 180.0) % 360.0) then setInside(name, false) end end),
     }
     if respawn then CreateThread(function() StudioC.SpawnRoom(name) end) end   -- redraw at once after an edit
 end
@@ -260,8 +254,8 @@ RegisterNetEvent('dps-studio:room', function(name, p)
             for i = 2, 3 do if pts[i] then pts[i]:remove() end end
             if prompt and prompt:find(name .. ':', 1, true) == 1 then prompt = nil; nui({ action = 'prompt' }) end
             local r = old
-            pts[2] = door(name .. ':in', r.door, 'Enter ' .. p.label, function() StudioC.Move(r.out, p.exit.h, name) end)
-            pts[3] = door(name .. ':out', r.out, 'Leave ' .. p.label, function() StudioC.Move(r.door, (p.entrance.h + 180.0) % 360.0) end)
+            pts[2] = door(name .. ':in', r.door, 'Enter ' .. p.label, function() if StudioC.Move(r.out, p.exit.h, name) then setInside(name, true) end end)
+            pts[3] = door(name .. ':out', r.out, 'Leave ' .. p.label, function() if StudioC.Move(r.door, (p.entrance.h + 180.0) % 360.0) then setInside(name, false) end end)
         end
         return updatePieces(name, p)
     end
@@ -270,6 +264,19 @@ RegisterNetEvent('dps-studio:room', function(name, p)
 end)
 
 RegisterNetEvent('dps-studio:rooms', setAll)
+
+-- Other ways in or out (teleports, Decorate, respawn): a slow, steady check. It only acts on a
+-- clear change of room, so walking round inside never flips the light.
+CreateThread(function()
+    while true do
+        Wait(2000)
+        local here = StudioC.RoomHere()
+        for name in pairs(inside) do
+            if name ~= here then setInside(name, false) end
+        end
+        if here then setInside(here, true) end
+    end
+end)
 
 CreateThread(function()
     setAll(lib.callback.await('dps-studio:rooms', false))
