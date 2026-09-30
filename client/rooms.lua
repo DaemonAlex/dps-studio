@@ -14,6 +14,15 @@ local shells, pieces = {}, {} -- name -> entity / { entities }
 local gen = {}                -- name -> number, bumped whenever a room is torn down
 local spawning = {}           -- name -> true while its models load
 local prompt                  -- the key of the prompt showing
+local inside = {}             -- name -> true while this player is inside that room
+
+-- Inside a room the world clock and rain are paused for this player only, through the same
+-- events the house system uses (dps-weatherbridge turns them into night light, no rain).
+local function setInside(name, on)
+    if (inside[name] or false) == on then return end
+    inside[name] = on or nil
+    TriggerEvent(on and 'qb-weathersync:client:DisableSync' or 'qb-weathersync:client:EnableSync')
+end
 
 local function nui(msg) SendNUIMessage(msg) end
 
@@ -140,6 +149,7 @@ local function door(key, coords, text, onUse)
 end
 
 local function removeRoom(name)
+    setInside(name, false)
     for _, p in ipairs(points[name] or {}) do p:remove() end
     points[name] = nil
     if prompt and prompt:find(name .. ':', 1, true) == 1 then prompt = nil; nui({ action = 'prompt' }) end
@@ -165,6 +175,12 @@ local function addRoom(p, respawn)
         }),
         door(name .. ':in', doorPos, 'Enter ' .. p.label, function() StudioC.Move(out, p.exit.h, name) end),
         door(name .. ':out', out, 'Leave ' .. p.label, function() StudioC.Move(doorPos, (p.entrance.h + 180.0) % 360.0) end),
+        lib.points.new({   -- inside the room: 45 m round the shell, well short of the door 60 m above
+            coords = shellPos,
+            distance = 45.0,
+            onEnter = function() setInside(name, true) end,
+            onExit = function() setInside(name, false) end,
+        }),
     }
     if respawn then CreateThread(function() StudioC.SpawnRoom(name) end) end   -- redraw at once after an edit
 end

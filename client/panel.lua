@@ -19,8 +19,8 @@ local function nui(msg) SendNUIMessage(msg) end
 local function notify(ok, text) lib.notify({ type = ok and 'success' or 'error', description = text }) end
 
 -- ---------------------------------------------------------------- admin flag
-RegisterNetEvent('dps-studio:admin', function(v) StudioC.isAdmin = v == true end)
-CreateThread(function() StudioC.isAdmin = lib.callback.await('dps-studio:isAdmin', false) == true end)
+RegisterNetEvent('dps-studio:admin', function(v) StudioC.isAdmin = v and true or false end)
+CreateThread(function() StudioC.isAdmin = lib.callback.await('dps-studio:isAdmin', false) and true or false end)
 
 -- ---------------------------------------------------------------- open / close
 local function focus(on) SetNuiFocus(on, on) end
@@ -229,10 +229,17 @@ end
 -- ---------------------------------------------------------------- /admin
 RegisterCommand('admin', function()
     if not StudioC.isAdmin then
-        StudioC.isAdmin = lib.callback.await('dps-studio:isAdmin', false) == true
-        if not StudioC.isAdmin then return end   -- silent for everyone else
+        local r = lib.callback.await('dps-studio:isAdmin', false)
+        print(('[dps-studio] /admin permission check answered: %s'):format(tostring(r)))
+        StudioC.isAdmin = r and true or false
+        if not StudioC.isAdmin then
+            return lib.notify({ type = 'error', description = 'Studio needs the admin permission (dps.entityselector).' })
+        end
     end
-    if StudioC.busy then return end
+    if StudioC.busy then
+        return lib.notify({ type = 'inform', description = 'Finish placing or walking first (Backspace leaves).' })
+    end
+    print(('[dps-studio] /admin %s'):format(open and 'closing' or 'opening'))
     if open then hide() else show() end
 end, false)
 

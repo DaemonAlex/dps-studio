@@ -219,7 +219,11 @@ lib.callback.register('dps-studio:rooms', function(src)
     return publicList()
 end)
 AddEventHandler('playerDropped', function() lastAsk[source] = nil end)
-lib.callback.register('dps-studio:isAdmin', function(src) return allowed(src) end)
+lib.callback.register('dps-studio:isAdmin', function(src)
+    local ok = allowed(src) and true or false
+    lib.print.info(('%s asked for Studio: %s'):format(who(src), ok and 'admin' or 'not admin'))
+    return ok
+end)
 
 -- ---------------------------------------------------------------- admin: reads
 lib.callback.register('dps-studio:boot', function(src)
