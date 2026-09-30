@@ -48,8 +48,8 @@ code{font:12px var(--mono);color:var(--cd-ink)}
 .meter span{display:inline-block;width:70px;height:6px;border-radius:6px;background:var(--cd-raised);overflow:hidden}
 .meter span i{display:block;height:100%;background:var(--cd-ok)}
 .meter.warn span i{background:var(--cd-warn)}.meter.full span i{background:var(--cd-bad)}
-.chips{flex:0 0 auto;display:flex;flex-wrap:wrap;gap:5px;padding:8px 10px 6px;border-bottom:1px solid var(--cd-border);background:rgba(17,21,34,.35);max-height:66px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--cd-border) transparent}
-.chip{font:500 11px/1 Roboto,sans-serif;text-transform:uppercase;letter-spacing:1px;color:var(--cd-dim);background:transparent;border:1.5px solid var(--cd-border);border-radius:999px;padding:5px 9px}
+.chips{flex:0 0 auto;display:flex;flex-wrap:wrap;gap:4px;padding:7px 10px 6px;border-bottom:1px solid var(--cd-border);background:rgba(17,21,34,.35)}
+.chip{font:500 11px/1.2 Roboto,sans-serif;text-transform:uppercase;letter-spacing:.6px;color:var(--cd-dim);background:transparent;border:1.5px solid var(--cd-border);border-radius:999px;padding:4px 8px;white-space:nowrap;max-width:100%}
 .chip:hover{border-color:var(--cd-edge);color:var(--cd-ink)}
 .chip.on{background:rgba(255,122,69,.22);border-color:var(--cd-sun);color:var(--cd-ink)}
 
