@@ -474,6 +474,7 @@
   function inspectCard(d) {
     const v4 = d.x != null ? `vector4(${f2(d.x)}, ${f2(d.y)}, ${f2(d.z)}, ${Number(d.h || 0).toFixed(1)})` : '';
     return `<h5>INSPECT</h5><div class="big">${esc(d.name)}</div><dl>
+      ${d.where ? `<dt>You</dt><dd>${esc(d.where)}</dd>` : ''}
       ${d.kind ? `<dt>Kind</dt><dd>${esc(d.kind)}</dd>` : ''}${d.hash ? `<dt>Hash</dt><dd>${esc(d.hash)}</dd>` : ''}${v4 ? `<dt>Spot</dt><dd>${esc(v4)}</dd>` : ''}</dl>
       ${d.note ? `<p>${esc(d.note)}</p>` : ''}<p>Open /admin, Inspect tab, to copy it.</p>`;
   }
@@ -504,7 +505,7 @@
         if (m.card) showCard(inspectCard(m.card));
         else if (m.linger) { clearTimeout(cardT); cardT = setTimeout(() => showCard(null), m.linger); }
         break;
-      case 'pos': showCard(`<h5>F3 COORDS · #${esc(m.id)}</h5><div class="big">${esc(m.text)}</div><p>Saved. Open /admin, Spots tab, to copy it.</p>`, 12000); break;
+      case 'pos': showCard(`<h5>F3 COORDS · #${esc(m.id)}</h5><div class="big">${esc(m.text)}</div>${m.where ? `<dl><dt>You</dt><dd>${esc(m.where)}</dd></dl>` : ''}<p>Saved. Open /admin, Spots tab, to copy it.</p>`, 12000); break;
       case 'changed':
         if (m.here !== undefined) S.here = m.here || null;
         if (S.shown && (!m.what || m.what === S.tab)) load();

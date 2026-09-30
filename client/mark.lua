@@ -30,7 +30,7 @@ function StudioC.MarkSpot(kind, label)
     if kind == 'pos' then
         local text = ('vector4(%.2f, %.2f, %.2f, %.1f)'):format(c.x, c.y, c.z, h)
         print('^3[pos]^7 ' .. text)
-        SendNUIMessage({ action = 'pos', text = text, id = id })
+        SendNUIMessage({ action = 'pos', text = text, id = id, where = StudioC.WhereAmI and StudioC.WhereAmI() or nil })
     else
         lib.notify({ type = 'success', title = ('Spot #%s saved'):format(tostring(id)),
             description = ('%s  %s'):format(label ~= '' and label or '', street) })
