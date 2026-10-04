@@ -1,0 +1,1136 @@
+[
+{
+"name": "amb-marketstation",
+"x": 529.5,
+"y": -1466.3,
+"z": 28.3,
+"h": 111.0,
+"n": 9,
+"spread": false
+},
+{
+"name": "amb-ragsriches-main-patches",
+"x": 29.4,
+"y": -1097.0,
+"z": 29.5,
+"h": 600.0,
+"n": 3363,
+"spread": false
+},
+{
+"name": "amb-ragsriches-mapdata",
+"x": -155.8,
+"y": -1067.8,
+"z": 30.8,
+"h": 401.0,
+"n": 2739,
+"spread": false
+},
+{
+"name": "amb-roxwood-interiors",
+"x": -1069.2,
+"y": 7263.0,
+"z": 7.0,
+"h": 600.0,
+"n": 82,
+"spread": false
+},
+{
+"name": "amb_dundeeoffice",
+"x": 336.2,
+"y": 326.9,
+"z": 104.3,
+"h": 193.0,
+"n": 946,
+"spread": false
+},
+{
+"name": "Aztec",
+"x": 1698.0,
+"y": 3750.4,
+"z": 33.5,
+"h": 70.0,
+"n": 1,
+"spread": false
+},
+{
+"name": "Bakery",
+"x": 1626.7,
+"y": 3706.9,
+"z": 34.7,
+"h": 70.0,
+"n": 1,
+"spread": false
+},
+{
+"name": "Bar",
+"x": 1604.7,
+"y": 3703.4,
+"z": 34.9,
+"h": 70.0,
+"n": 3,
+"spread": false
+},
+{
+"name": "brofx_formula",
+"x": 1252.3,
+"y": 192.4,
+"z": 80.7,
+"h": 600.0,
+"n": 8273,
+"spread": false
+},
+{
+"name": "casinoXvinewoodfire",
+"x": 319.1,
+"y": 235.8,
+"z": 104.6,
+"h": 195.0,
+"n": 368,
+"spread": false
+},
+{
+"name": "cfx-gabz-catcafe",
+"x": -619.9,
+"y": -931.8,
+"z": 21.3,
+"h": 600.0,
+"n": 905,
+"spread": false
+},
+{
+"name": "cfx-gabz-koi",
+"x": -1038.3,
+"y": -1480.7,
+"z": 12.3,
+"h": 70.0,
+"n": 2,
+"spread": false
+},
+{
+"name": "cfx-gabz-mapdata",
+"x": 879.6,
+"y": -1004.2,
+"z": 25.7,
+"h": 600.0,
+"n": 1818,
+"spread": false
+},
+{
+"name": "cfx-gabz-pizzeria",
+"x": 807.0,
+"y": -753.8,
+"z": 26.3,
+"h": 78.0,
+"n": 67,
+"spread": false
+},
+{
+"name": "cfx-gabz-vbmarket",
+"x": -1109.2,
+"y": -1383.8,
+"z": 4.0,
+"h": 524.0,
+"n": 2811,
+"spread": false
+},
+{
+"name": "cfx_chuz_sandy_shores_boat_house",
+"x": 1538.5,
+"y": 3791.8,
+"z": 38.0,
+"h": 71.0,
+"n": 132,
+"spread": false
+},
+{
+"name": "cfx_gn_biker_grapeseed",
+"x": 1948.8,
+"y": 4625.1,
+"z": 42.9,
+"h": 93.0,
+"n": 4,
+"spread": false
+},
+{
+"name": "cfx_gn_grapeseed_mapdata",
+"x": 1653.7,
+"y": 4751.2,
+"z": 41.1,
+"h": 600.0,
+"n": 2783,
+"spread": false
+},
+{
+"name": "cfx_gn_sheriff2_grapeseed",
+"x": 1650.2,
+"y": 4834.2,
+"z": 41.6,
+"h": 98.0,
+"n": 24,
+"spread": false
+},
+{
+"name": "cfx_gn_upnatom2_grapeseed",
+"x": 1791.4,
+"y": 4598.3,
+"z": 36.7,
+"h": 89.0,
+"n": 58,
+"spread": false
+},
+{
+"name": "cfx_prompt_Escape_Tunnel",
+"x": 1688.7,
+"y": 2254.7,
+"z": 62.6,
+"h": 70.0,
+"n": 2,
+"spread": false
+},
+{
+"name": "cfx_prompt_flats_building_2",
+"x": 171.5,
+"y": -1068.6,
+"z": 31.1,
+"h": 70.0,
+"n": 2,
+"spread": false
+},
+{
+"name": "cfx_prompt_flats_interior_1",
+"x": 185.8,
+"y": -1057.4,
+"z": 66.6,
+"h": 70.0,
+"n": 2,
+"spread": false
+},
+{
+"name": "cfx_prompt_flats_interior_2",
+"x": 68.8,
+"y": -1023.1,
+"z": 57.0,
+"h": 70.0,
+"n": 2,
+"spread": false
+},
+{
+"name": "cfx_prompt_marijuana_plantation",
+"x": -188.4,
+"y": -1698.1,
+"z": 29.5,
+"h": 70.0,
+"n": 2,
+"spread": false
+},
+{
+"name": "cfx_prompt_mosley_dealership",
+"x": -27.2,
+"y": -1671.8,
+"z": 28.8,
+"h": 120.0,
+"n": 116,
+"spread": false
+},
+{
+"name": "cfx_prompt_paleto_mapdata",
+"x": 142.9,
+"y": 6385.1,
+"z": 30.4,
+"h": 600.0,
+"n": 3403,
+"spread": false
+},
+{
+"name": "cfx_prompt_pillbox_fd",
+"x": 312.2,
+"y": -676.0,
+"z": 32.3,
+"h": 70.0,
+"n": 3,
+"spread": false
+},
+{
+"name": "cfx_prompt_sandy_mapdata",
+"x": 1652.6,
+"y": 3623.5,
+"z": 22.0,
+"h": 600.0,
+"n": 16031,
+"spread": false
+},
+{
+"name": "closed_gates_ymap_replace",
+"x": 1730.4,
+"y": 3699.2,
+"z": 35.5,
+"h": 110.0,
+"n": 4,
+"spread": false
+},
+{
+"name": "Club",
+"x": 1673.0,
+"y": 3764.0,
+"z": 34.2,
+"h": 70.0,
+"n": 1,
+"spread": false
+},
+{
+"name": "Coffee Shop",
+"x": 1631.4,
+"y": 3739.3,
+"z": 35.0,
+"h": 70.0,
+"n": 1,
+"spread": false
+},
+{
+"name": "Dream Cream",
+"x": 1613.0,
+"y": 3708.3,
+"z": 35.8,
+"h": 70.0,
+"n": 1,
+"spread": false
+},
+{
+"name": "ed_pawn",
+"x": -235.1,
+"y": 6226.1,
+"z": 32.9,
+"h": 81.0,
+"n": 6,
+"spread": false
+},
+{
+"name": "Fire Station",
+"x": 1700.1,
+"y": 3784.9,
+"z": 48.4,
+"h": 70.0,
+"n": 1,
+"spread": false
+},
+{
+"name": "flywheels",
+"x": 1759.6,
+"y": 3326.9,
+"z": 40.6,
+"h": 89.0,
+"n": 280,
+"spread": false
+},
+{
+"name": "hn_hallwayroom",
+"x": -1003.4,
+"y": -484.4,
+"z": 50.6,
+"h": 70.0,
+"n": 2,
+"spread": false
+},
+{
+"name": "hn_tailorroom_meta",
+"x": -1003.4,
+"y": -484.4,
+"z": 45.8,
+"h": 70.0,
+"n": 4,
+"spread": false
+},
+{
+"name": "houseplacement",
+"x": 1583.4,
+"y": 3740.3,
+"z": 35.4,
+"h": 532.0,
+"n": 82,
+"spread": false
+},
+{
+"name": "jr_cayo_mansion_expansion",
+"x": 5019.9,
+"y": -5743.1,
+"z": 18.9,
+"h": 174.0,
+"n": 1111,
+"spread": false
+},
+{
+"name": "k4mb1-cashexchange",
+"x": 441.2,
+"y": -1892.4,
+"z": 24.6,
+"h": 70.0,
+"n": 2,
+"spread": false
+},
+{
+"name": "k4mb1-cashexchange2",
+"x": 215.3,
+"y": -1284.8,
+"z": 28.4,
+"h": 322.0,
+"n": 343,
+"spread": false
+},
+{
+"name": "k4mb1-miningcave",
+"x": 2900.9,
+"y": 2701.4,
+"z": 44.5,
+"h": 136.0,
+"n": 5,
+"spread": false
+},
+{
+"name": "k4mb1-oilrig",
+"x": -1426.7,
+"y": 7277.8,
+"z": 21.2,
+"h": 93.0,
+"n": 212,
+"spread": false
+},
+{
+"name": "k4mb1-pawnshop",
+"x": 148.9,
+"y": -1291.2,
+"z": 28.9,
+"h": 162.0,
+"n": 321,
+"spread": false
+},
+{
+"name": "Lawyers Office",
+"x": 1689.9,
+"y": 3745.1,
+"z": 43.9,
+"h": 70.0,
+"n": 1,
+"spread": false
+},
+{
+"name": "lev_laundromat",
+"x": 895.5,
+"y": -1038.5,
+"z": 42.1,
+"h": 70.0,
+"n": 3,
+"spread": false
+},
+{
+"name": "m-MineMap",
+"x": -662.2,
+"y": 2131.9,
+"z": 116.9,
+"h": 308.0,
+"n": 192,
+"spread": false
+},
+{
+"name": "Masi_jetsam",
+"x": 759.6,
+"y": -2951.5,
+"z": 5.0,
+"h": 183.0,
+"n": 349,
+"spread": false
+},
+{
+"name": "mrpdXlegionFD",
+"x": 320.4,
+"y": -844.2,
+"z": 28.4,
+"h": 600.0,
+"n": 942,
+"spread": false
+},
+{
+"name": "natty_3d_hideout",
+"x": 575.9,
+"y": 3562.7,
+"z": 32.3,
+"h": 364.0,
+"n": 276,
+"spread": false
+},
+{
+"name": "noints",
+"x": 1521.0,
+"y": 3571.9,
+"z": 40.9,
+"h": 281.0,
+"n": 3,
+"spread": false
+},
+{
+"name": "Ocean_Medical_Center",
+"x": -1883.4,
+"y": -425.8,
+"z": 42.9,
+"h": 445.0,
+"n": 1656,
+"spread": false
+},
+{
+"name": "onx_maps_summer_camp",
+"x": -1622.7,
+"y": 4745.9,
+"z": 54.3,
+"h": 108.0,
+"n": 105,
+"spread": false
+},
+{
+"name": "patoche_paleto_airport_02",
+"x": -1809.6,
+"y": 4924.8,
+"z": 10.3,
+"h": 600.0,
+"n": 1936,
+"spread": false
+},
+{
+"name": "Pawn Shop",
+"x": 1632.2,
+"y": 3719.3,
+"z": 35.4,
+"h": 70.0,
+"n": 3,
+"spread": false
+},
+{
+"name": "Post Op",
+"x": 1717.7,
+"y": 3762.1,
+"z": 36.4,
+"h": 70.0,
+"n": 1,
+"spread": false
+},
+{
+"name": "prompt_bolingbroke_prison_interiors",
+"x": 1700.7,
+"y": 2611.2,
+"z": 44.8,
+"h": 432.0,
+"n": 2409,
+"spread": false
+},
+{
+"name": "prompt_chinese_casino",
+"x": 314.6,
+"y": 228.6,
+"z": 104.6,
+"h": 187.0,
+"n": 333,
+"spread": false
+},
+{
+"name": "prompt_church_prison",
+"x": 1770.1,
+"y": 2637.3,
+"z": 48.0,
+"h": 70.0,
+"n": 2,
+"spread": false
+},
+{
+"name": "prompt_d1n-stab-city-lost-mc",
+"x": -31.0,
+"y": 3766.6,
+"z": 38.6,
+"h": 420.0,
+"n": 2619,
+"spread": false
+},
+{
+"name": "prompt_mrpd",
+"x": 320.4,
+"y": -868.2,
+"z": 28.4,
+"h": 568.0,
+"n": 1849,
+"spread": false
+},
+{
+"name": "prompt_nm_dynasty8",
+"x": -890.4,
+"y": -354.4,
+"z": 38.3,
+"h": 162.0,
+"n": 258,
+"spread": false
+},
+{
+"name": "prompt_paleto_hunting_store",
+"x": -675.3,
+"y": 5836.1,
+"z": 22.1,
+"h": 70.0,
+"n": 3,
+"spread": false
+},
+{
+"name": "prompt_pillbox_hospital",
+"x": 307.8,
+"y": -692.3,
+"z": 33.5,
+"h": 330.0,
+"n": 448,
+"spread": false
+},
+{
+"name": "prompt_prison_escape_dlc",
+"x": 1658.6,
+"y": 2421.6,
+"z": 72.9,
+"h": 381.0,
+"n": 28,
+"spread": false
+},
+{
+"name": "prompt_prison_study",
+"x": 1735.7,
+"y": 2644.5,
+"z": 52.8,
+"h": 70.0,
+"n": 2,
+"spread": false
+},
+{
+"name": "prompt_prison_tower_23",
+"x": 1653.7,
+"y": 2606.6,
+"z": 48.3,
+"h": 136.0,
+"n": 8,
+"spread": false
+},
+{
+"name": "prompt_sandy_airfield",
+"x": 1394.9,
+"y": 3179.2,
+"z": 40.2,
+"h": 600.0,
+"n": 881,
+"spread": false
+},
+{
+"name": "prompt_sandy_apts",
+"x": 1490.7,
+"y": 3557.8,
+"z": 34.8,
+"h": 351.0,
+"n": 973,
+"spread": false
+},
+{
+"name": "prompt_sandy_bank",
+"x": 1835.4,
+"y": 3848.1,
+"z": 32.9,
+"h": 106.0,
+"n": 153,
+"spread": false
+},
+{
+"name": "prompt_sandy_beaches",
+"x": 1719.2,
+"y": 3912.9,
+"z": 32.9,
+"h": 600.0,
+"n": 1799,
+"spread": false
+},
+{
+"name": "prompt_sandy_church",
+"x": 1812.5,
+"y": 3912.5,
+"z": 33.2,
+"h": 125.0,
+"n": 213,
+"spread": false
+},
+{
+"name": "prompt_sandy_cityhall",
+"x": 1760.3,
+"y": 3809.3,
+"z": 34.5,
+"h": 118.0,
+"n": 526,
+"spread": false
+},
+{
+"name": "prompt_sandy_classic_car_dealership",
+"x": 1899.5,
+"y": 3723.2,
+"z": 31.8,
+"h": 99.0,
+"n": 31,
+"spread": false
+},
+{
+"name": "prompt_sandy_corner",
+"x": 1911.8,
+"y": 3898.6,
+"z": 32.0,
+"h": 128.0,
+"n": 380,
+"spread": false
+},
+{
+"name": "prompt_sandy_downtown",
+"x": 1654.5,
+"y": 3740.2,
+"z": 34.6,
+"h": 162.0,
+"n": 364,
+"spread": false
+},
+{
+"name": "prompt_sandy_fire2",
+"x": 1691.3,
+"y": 3596.7,
+"z": 34.6,
+"h": 113.0,
+"n": 190,
+"spread": false
+},
+{
+"name": "prompt_sandy_hospital2",
+"x": 1759.2,
+"y": 3619.8,
+"z": 34.1,
+"h": 135.0,
+"n": 419,
+"spread": false
+},
+{
+"name": "prompt_sandy_houses_part1",
+"x": 1575.9,
+"y": 3732.8,
+"z": 33.8,
+"h": 553.0,
+"n": 1936,
+"spread": false
+},
+{
+"name": "prompt_sandy_illegal_garage",
+"x": 1978.1,
+"y": 3780.6,
+"z": 31.3,
+"h": 123.0,
+"n": 195,
+"spread": false
+},
+{
+"name": "prompt_sandy_market",
+"x": 1952.8,
+"y": 3824.2,
+"z": 31.7,
+"h": 121.0,
+"n": 603,
+"spread": false
+},
+{
+"name": "prompt_sandy_mechanic",
+"x": 1707.2,
+"y": 3691.8,
+"z": 37.8,
+"h": 70.0,
+"n": 2,
+"spread": false
+},
+{
+"name": "prompt_sandy_motel",
+"x": 1616.0,
+"y": 3776.2,
+"z": 34.9,
+"h": 140.0,
+"n": 656,
+"spread": false
+},
+{
+"name": "prompt_sandy_roads",
+"x": 1841.6,
+"y": 3747.0,
+"z": 32.7,
+"h": 473.0,
+"n": 521,
+"spread": false
+},
+{
+"name": "prompt_sandy_sheriff",
+"x": 1833.4,
+"y": 3682.0,
+"z": 33.6,
+"h": 103.0,
+"n": 152,
+"spread": false
+},
+{
+"name": "prompt_sandy_train_station",
+"x": 1890.3,
+"y": 3578.3,
+"z": 37.8,
+"h": 110.0,
+"n": 71,
+"spread": false
+},
+{
+"name": "prompt_sandy_university",
+"x": 1525.6,
+"y": 3686.3,
+"z": 33.5,
+"h": 159.0,
+"n": 337,
+"spread": false
+},
+{
+"name": "prompt_seth_int_garage_01",
+"x": -777.9,
+"y": -371.2,
+"z": 49.8,
+"h": 70.0,
+"n": 2,
+"spread": false
+},
+{
+"name": "prompt_trainstation_ls",
+"x": 865.6,
+"y": -543.9,
+"z": 42.9,
+"h": 415.0,
+"n": 794,
+"spread": false
+},
+{
+"name": "prompt_trainstation_paleto",
+"x": 181.3,
+"y": 6367.1,
+"z": 31.3,
+"h": 127.0,
+"n": 226,
+"spread": false
+},
+{
+"name": "promptrace_ipl",
+"x": 1715.3,
+"y": 3776.1,
+"z": 29.6,
+"h": 600.0,
+"n": 997,
+"spread": false
+},
+{
+"name": "Qs_410Th_Map",
+"x": 393.6,
+"y": -49.8,
+"z": 79.4,
+"h": 600.0,
+"n": 1754,
+"spread": false
+},
+{
+"name": "Qs_BallasMap",
+"x": 179.4,
+"y": -1754.1,
+"z": 23.8,
+"h": 600.0,
+"n": 2888,
+"spread": false
+},
+{
+"name": "Qs_GangHoodMap",
+"x": 1180.5,
+"y": -419.6,
+"z": 68.1,
+"h": 238.0,
+"n": 1224,
+"spread": false
+},
+{
+"name": "Qs_GroveStreet",
+"x": 117.8,
+"y": -1580.8,
+"z": 29.5,
+"h": 600.0,
+"n": 1991,
+"spread": false
+},
+{
+"name": "Qs_MafiaMap",
+"x": -1153.5,
+"y": -1164.7,
+"z": 6.7,
+"h": 600.0,
+"n": 1505,
+"spread": false
+},
+{
+"name": "Qs_MorningwoodMap",
+"x": -1330.6,
+"y": -120.3,
+"z": 48.1,
+"h": 600.0,
+"n": 1597,
+"spread": false
+},
+{
+"name": "Qs_SeaSide_V3",
+"x": -1444.8,
+"y": -650.5,
+"z": 29.9,
+"h": 600.0,
+"n": 1911,
+"spread": false
+},
+{
+"name": "Qs_StrawberryMap",
+"x": 205.1,
+"y": -1388.3,
+"z": 28.4,
+"h": 600.0,
+"n": 2410,
+"spread": false
+},
+{
+"name": "Qs_VagosMap",
+"x": 346.4,
+"y": -1924.3,
+"z": 22.9,
+"h": 448.0,
+"n": 2085,
+"spread": false
+},
+{
+"name": "Qs_Vespucci_Map",
+"x": -1113.3,
+"y": -1290.0,
+"z": 6.5,
+"h": 544.0,
+"n": 1125,
+"spread": false
+},
+{
+"name": "rfc_los_santos_airport_fix",
+"x": -1149.0,
+"y": -2004.4,
+"z": 12.2,
+"h": 70.0,
+"n": 4,
+"spread": false
+},
+{
+"name": "rfc_los_santos_customs",
+"x": -315.4,
+"y": -224.8,
+"z": 42.7,
+"h": 419.0,
+"n": 779,
+"spread": false
+},
+{
+"name": "ROXWOOD-BAITSHOP",
+"x": -940.5,
+"y": 6547.3,
+"z": 2.4,
+"h": 70.0,
+"n": 3,
+"spread": false
+},
+{
+"name": "ROXWOOD-BUSDEPOT",
+"x": -3541.3,
+"y": 5959.8,
+"z": 2.6,
+"h": 70.0,
+"n": 2,
+"spread": false
+},
+{
+"name": "ROXWOOD-DRUGHOUSES",
+"x": -2545.6,
+"y": 7342.3,
+"z": 59.8,
+"h": 600.0,
+"n": 2,
+"spread": false
+},
+{
+"name": "rtx_cablecar",
+"x": -149.2,
+"y": 5582.2,
+"z": 780.2,
+"h": 600.0,
+"n": 22,
+"spread": false
+},
+{
+"name": "rtx_themepark_objects",
+"x": -1594.0,
+"y": -771.0,
+"z": 13.8,
+"h": 600.0,
+"n": 2446,
+"spread": false
+},
+{
+"name": "sm_hacker_thief_den",
+"x": 892.5,
+"y": 3562.0,
+"z": 33.7,
+"h": 70.0,
+"n": 34,
+"spread": false
+},
+{
+"name": "tstudio_lsia",
+"x": -1019.0,
+"y": -2863.2,
+"z": 16.6,
+"h": 600.0,
+"n": 820,
+"spread": false
+},
+{
+"name": "uj_wnews_v1",
+"x": -564.7,
+"y": -897.9,
+"z": 25.5,
+"h": 144.0,
+"n": 225,
+"spread": false
+},
+{
+"name": "wxmaps_racetrack",
+"x": 886.5,
+"y": 2246.6,
+"z": 55.9,
+"h": 600.0,
+"n": 6271,
+"spread": false
+},
+{
+"name": "amb-globeevchargers",
+"x": 694.3,
+"y": 2463.1,
+"z": 36.8,
+"h": 600.0,
+"n": 8,
+"spread": true
+},
+{
+"name": "amb-roxwood-interiors2",
+"x": -1620.8,
+"y": 7330.5,
+"z": 20.1,
+"h": 600.0,
+"n": 226,
+"spread": true
+},
+{
+"name": "amb-roxwood-map4",
+"x": -2114.1,
+"y": 8014.4,
+"z": 5.6,
+"h": 600.0,
+"n": 76,
+"spread": true
+},
+{
+"name": "amb-roxwood-mapdata",
+"x": -3460.1,
+"y": 8226.5,
+"z": 59.2,
+"h": 600.0,
+"n": 11676,
+"spread": true
+},
+{
+"name": "amb-roxwood-patches",
+"x": 434.8,
+"y": 6516.7,
+"z": 27.2,
+"h": 600.0,
+"n": 3995,
+"spread": true
+},
+{
+"name": "amb-roxwood-placeholder",
+"x": -2688.3,
+"y": 8055.8,
+"z": 44.3,
+"h": 600.0,
+"n": 4176,
+"spread": true
+},
+{
+"name": "amb-roxwood-props",
+"x": -2390.9,
+"y": 7611.2,
+"z": 27.3,
+"h": 600.0,
+"n": 70163,
+"spread": true
+},
+{
+"name": "cfx_onx_vegetation",
+"x": 357.2,
+"y": 2640.9,
+"z": 80.7,
+"h": 600.0,
+"n": 26109,
+"spread": true
+},
+{
+"name": "prompt_burger_shot",
+"x": -164.8,
+"y": -231.6,
+"z": 31.5,
+"h": 600.0,
+"n": 8778,
+"spread": true
+},
+{
+"name": "prompt_gym",
+"x": -1446.2,
+"y": 400.2,
+"z": 38.4,
+"h": 600.0,
+"n": 3830,
+"spread": true
+},
+{
+"name": "prompt_sahp",
+"x": 1321.2,
+"y": -256.1,
+"z": 61.6,
+"h": 600.0,
+"n": 4898,
+"spread": true
+},
+{
+"name": "TheEternal_SenoraNational_NPS_Sign",
+"x": 1298.6,
+"y": 3339.6,
+"z": 41.2,
+"h": 600.0,
+"n": 5357,
+"spread": true
+},
+{
+"name": "vertex-hub",
+"x": -536.1,
+"y": 867.9,
+"z": 28.3,
+"h": 600.0,
+"n": 8074,
+"spread": true
+}
+]

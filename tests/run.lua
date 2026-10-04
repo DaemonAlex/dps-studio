@@ -4,6 +4,7 @@ local function vec(...) return { ... } end
 vec3, vec4, vector3, vector4 = vec3 or vec, vec4 or vec, vector3 or vec, vector4 or vec
 dofile('shared/logic.lua')
 dofile('shared/shellmeta.lua')
+dofile('shared/ipls.lua')
 
 local fails, n = 0, 0
 local function check(name, ok) n = n + 1; print((ok and 'PASS ' or 'FAIL ') .. name); if not ok then fails = fails + 1 end end
@@ -32,6 +33,13 @@ check('furniture: image path joined', cats[1].items[1].img == 'nui://x/a.png')
 check('furniture: bad model name refused', models['bad name!'] == nil and models.prop_a)
 check('furniture: sandbox cannot reach os', #Studio.ParseFurniture('os.exit(1)', '') == 0)
 check('furniture: broken file gives empty', #Studio.ParseFurniture('this is not lua', '') == 0)
+local dsrc = "Config.Furniture = { ['a'] = { label = 'Table', items = { { object = 'p1', label = 'One' }, { object = 'p2', label = 'Two' } } }, ['b'] = { label = 'PC table', items = { { object = 'p2', label = 'Two' }, { object = 'p1', label = 'One' } } }, ['c'] = { label = 'Chair', items = { { object = 'p1', label = 'One' }, { object = 'p3', label = 'Three' }, { object = 'p3', label = 'Three' } } } }"
+local dc = Studio.ParseFurniture(dsrc, '', {})
+local byLabel = {}; for _, c in ipairs(dc) do byLabel[c.label] = c end
+check('furniture: a piece shared by groups shows in each group', byLabel['Chair'] and #byLabel['Chair'].items == 2)
+check('furniture: groups with the same pieces show once, with both names', #dc == 2 and byLabel['Table · PC table'] ~= nil)
+local d2 = Studio.ParseFurniture("Config.Furniture = { ['a'] = { label = 'Couch Table', items = { { object = 'p1' } } }, ['b'] = { label = 'Table', items = { { object = 'p1' } } } }", '', {})
+check('furniture: a name inside another name still shows', #d2 == 1 and d2[1].label == 'Couch Table · Table')
 
 -- spots and offsets
 check('spot valid', Studio.ValidSpot({ x = 1, y = 2, z = 3, h = 4 }))
@@ -97,6 +105,43 @@ local slow = 'local i = 0 while true do i = i + 1 end'
 check('furniture: endless file is stopped', #Studio.ParseFurniture(slow, '') == 0)
 check('furniture: file cannot change the string library', #Studio.ParseFurniture("string.format = nil Config.Furniture = {}", '') == 0 and string.format ~= nil)
 
+-- interior (IPL) rooms and styles
+local ist = Studio.CleanStyle({ preset = 'custom', choice = { Walls = 'plain', ['<b>'] = 'x', Big = string.rep('a', 60) }, on = { Details = { chairs = true, bad = 'yes' } } })
+check('style: keeps good choices, drops bad ones', ist.preset == 'custom' and ist.choice.Walls == 'plain' and ist.choice['<b>'] == nil and ist.choice.Big == nil and ist.on.Details.chairs and ist.on.Details.bad == nil)
+check('style: unknown preset becomes default', Studio.CleanStyle({ preset = 'rainbow' }).preset == 'default' and Studio.CleanStyle(nil).preset == 'default')
+local iroom = Studio.NewIplRoom('club', 'Club', 'GetBikerClubhouse1Object', { x = 1, y = 2, z = 3, h = 0 }, { x = 1107, y = -3157, z = -37.5, h = 90 }, { preset = 'full' })
+check('ipl room: kind, interior and style on the first look', iroom.kind == 'ipl' and iroom.ipl == 'GetBikerClubhouse1Object' and iroom.looks[1].style.preset == 'full')
+local ipub = Studio.PublicRoom(iroom)
+check('ipl room: public data carries kind, interior and style', ipub.kind == 'ipl' and ipub.ipl == 'GetBikerClubhouse1Object' and ipub.style.preset == 'full')
+local il2 = Studio.AddLook(iroom, 'Night', iroom.look)
+check('ipl room: a copied look copies the style', il2.style.preset == 'full')
+local il3 = Studio.AddLook(iroom, 'Bare')
+check('ipl room: a new empty look starts on the default style', il3.style.preset == 'default')
+check('ipl room: clean passes with the interior in the list', Studio.CleanRoom(Studio.Copy(iroom), {}, nil, { GetBikerClubhouse1Object = true }) ~= nil)
+check('ipl room: clean refuses an unknown interior', Studio.CleanRoom(Studio.Copy(iroom), {}, nil, {}) == nil)
+check('shell room: public data says shell', Studio.PublicRoom(room).kind == 'shell')
+check('place key: made from a spot, rounded', Studio.PlaceKey({ x = -1011.6, y = -478.2, z = 50.4 }) == 'at:-1012,-478,50')
+check('place key: accepted shape only', Studio.IsPlaceKey('at:-1012,-478,50') and not Studio.IsPlaceKey('at:1,2') and not Studio.IsPlaceKey('GetX'))
+local proom = Studio.NewIplRoom('movie', 'Movie Office', 'at:-1012,-478,50', { x = 1, y = 2, z = 3, h = 0 }, { x = -1011.6, y = -478.2, z = 50.4, h = 0 }, nil)
+check('place room: clean passes without being in the interior list', Studio.CleanRoom(Studio.Copy(proom), {}, nil, {}) ~= nil)
+
+-- door and room access
+local acc = Studio.CleanAccess({ groups = { police = 0, bcso = '2', ['bad job!'] = 1 }, items = { 'keycard', 'no good!' }, characters = { 'ABC123' }, passcode = '1234' })
+check('access: good parts kept, bad parts dropped', acc.groups.police == 0 and acc.groups.bcso == 2 and acc.groups['bad job!'] == nil and #acc.items == 1 and acc.characters[1] == 'ABC123' and acc.passcode == '1234')
+check('access: nothing given means open', Studio.CleanAccess(nil).open == true)
+local ox = Studio.AccessToOx(acc)
+check('access to ox: fields filled', ox.groups.police == 0 and ox.items[1] == 'keycard' and ox.passcode == '1234')
+local oxo = Studio.AccessToOx({ open = true })
+check('access to ox: open clears every field', oxo.groups == '' and oxo.items == '' and oxo.characters == '' and oxo.passcode == '')
+check('access to ox: empty lists clear', Studio.AccessToOx({ groups = {} }).groups == '')
+local who = { job = 'bcso', grade = 3, citizenid = 'XYZ', has = function(i) return i == 'keycard' end }
+check('allows: job at or above the grade', Studio.AccessAllows(acc, who))
+check('allows: job below the grade refused', not Studio.AccessAllows({ groups = { bcso = 4 } }, who))
+check('allows: key item', Studio.AccessAllows({ items = { 'keycard' } }, { has = function(i) return i == 'keycard' end }))
+check('allows: named character', Studio.AccessAllows({ characters = { 'XYZ' } }, { citizenid = 'XYZ' }))
+check('allows: staff only lets staff in, no one else', Studio.AccessAllows({ staff = true }, { staff = true }) and not Studio.AccessAllows({ staff = true }, { job = 'police' }))
+check('allows: gang grade', Studio.AccessAllows({ groups = { ballas = 1 } }, { gang = 'ballas', gangGrade = 2 }))
+
 -- old files
 local s = Studio.ParseSpotLine('210 | 2026-09-30 07:21:11 | Schtoop | greenroom | vec3(690.36, 588.38, 131.06) | heading 343.8 | no prop within 6m | Marlowe Dr | Vinewood Hills')
 check('spot line: parsed', s and s.label == 'greenroom' and s.x == 690.36 and s.h == 343.8 and s.street == 'Marlowe Dr' and s.zone == 'Vinewood Hills' and s.propHash == nil)
@@ -122,5 +167,8 @@ if arg[2] then
     check('live furniture: some', k > 0)
 end
 
+local iseen, idup = {}, false
+for _, e in ipairs(StudioIpls) do if iseen[e.export] then idup = true end; iseen[e.export] = true end
+check('interior list: filled, no duplicates', #StudioIpls > 50 and not idup)
 print(('%d checks, %s'):format(n, fails == 0 and 'ALL PASS' or (fails .. ' FAILED')))
 os.exit(fails == 0 and 0 or 1)

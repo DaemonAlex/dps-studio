@@ -34,6 +34,7 @@ local function show(t)
 end
 
 local function hide()
+    if StudioC.Unlight then StudioC.Unlight() end
     open = false
     focus(false)
     nui({ action = 'hide' })
@@ -114,8 +115,65 @@ end
 ---Leaves the panel for another screen: a preview that is still showing ends first.
 local function leave()
     if pv.on and not pv.walking then previewStop() end
+    if StudioC.IplVisiting and StudioC.IplVisiting() then StudioC.IplLeave(nil, true) end   -- the next move places the player
     pick = nil
     hide()
+end
+
+-- ---------------------------------------------------------------- walking an interior (IPL)
+local iplWalking = false
+local function iplWalk()
+    if iplWalking then return end
+    iplWalking = true
+    hide()
+    StudioC.SetBusy(true)
+    local list = { { 'Walk', 'look around' }, { 'Enter', 'back to the panel, try styles' } }
+    if pick then list[#list + 1] = { 'G', 'the way out of ' .. pick.label .. ' is here' } end
+    list[#list + 1] = { 'Backspace', 'leave the interior' }
+    nui({ action = 'keys', title = 'Interior', keys = list })
+    CreateThread(function()
+        local calm = GetGameTimer() + 300
+        while iplWalking do
+            DisableControlAction(0, 191, true); DisableControlAction(0, 194, true); DisableControlAction(0, 177, true)
+            DisableControlAction(0, 47, true); DisableControlAction(0, 199, true); DisableControlAction(0, 200, true)
+            if not StudioC.IplVisiting() then
+                iplWalking = false
+            elseif GetGameTimer() < calm then
+                -- wait out the key that started this
+            elseif IsDisabledControlJustPressed(0, 191) then
+                iplWalking = false
+                nui({ action = 'keys' })
+                StudioC.SetBusy(false)
+                show('shells')
+            elseif pick and IsDisabledControlJustPressed(0, 47) then
+                local ped = cache.ped
+                local p = GetEntityCoords(ped)
+                local export = StudioC.IplVisiting()
+                local d = { kind = 'ipl', ipl = export, style = StudioC.IplVisitStyle and StudioC.IplVisitStyle() or nil,
+                            name = pick.name, label = pick.label, entrance = pick.entrance, redo = pick.redo == true, access = pick.access,
+                            exit = { x = p.x, y = p.y, z = p.z, h = GetEntityHeading(ped) } }
+                local ok, err = lib.callback.await('dps-studio:roomCreate', false, d)
+                if ok then
+                    iplWalking = false
+                    nui({ action = 'keys' })
+                    local e = pick.entrance
+                    pick = nil
+                    StudioC.IplLeave(vec4(e.x, e.y, e.z, e.h))
+                    StudioC.SetBusy(false)
+                    notify(true, ('%s is ready. Press E at the door to try it.'):format(d.label))
+                else
+                    notify(false, err or 'Not saved')
+                end
+            elseif IsDisabledControlJustPressed(0, 194) or IsDisabledControlJustPressed(0, 177) or IsDisabledControlJustPressed(0, 200) then
+                iplWalking = false
+                nui({ action = 'keys' })
+                StudioC.IplLeave()
+                StudioC.SetBusy(false)
+                show('shells')
+            end
+            Wait(0)
+        end
+    end)
 end
 
 local function previewShell(model)
@@ -158,7 +216,7 @@ local function walk()
     if not pv.obj then return notify(false, 'Pick a shell that loads first') end
     hide()
     pv.walking = true
-    StudioC.busy = true
+    StudioC.SetBusy(true)
     local ped = cache.ped
     RenderScriptCams(false, false, 0, true, true)
     local p = floorPoint()
@@ -181,17 +239,17 @@ local function walk()
                 RenderScriptCams(true, false, 0, true, true)
                 placeCam()
                 nui({ action = 'keys' })
-                StudioC.busy = false
+                StudioC.SetBusy(false)
                 show('shells')
             elseif pick and IsDisabledControlJustPressed(0, 47) then -- G: the way out is here
                 local ped2 = cache.ped
                 local off = GetEntityCoords(ped2) - BASE
-                local d = { name = pick.name, label = pick.label, shell = pv.model, entrance = pick.entrance, redo = pick.redo == true,
+                local d = { name = pick.name, label = pick.label, shell = pv.model, entrance = pick.entrance, redo = pick.redo == true, access = pick.access,
                             exit = { x = off.x, y = off.y, z = off.z, h = GetEntityHeading(ped2) } }
                 local ok, err = lib.callback.await('dps-studio:roomCreate', false, d)
                 if ok then
                     pv.walking = false
-                    StudioC.busy = false
+                    StudioC.SetBusy(false)
                     local e = pick.entrance
                     pick = nil
                     previewStop({ x = e.x, y = e.y, z = e.z, h = e.h })
@@ -201,7 +259,7 @@ local function walk()
                 end
             elseif IsDisabledControlJustPressed(0, 194) or IsDisabledControlJustPressed(0, 177) or IsDisabledControlJustPressed(0, 200) then -- Backspace / Esc: leave
                 pv.walking = false
-                StudioC.busy = false
+                StudioC.SetBusy(false)
                 previewStop()
                 show('rooms')
             else
@@ -240,7 +298,12 @@ RegisterCommand('admin', function()
         return lib.notify({ type = 'inform', description = 'Finish placing or walking first (Backspace leaves).' })
     end
     print(('[dps-studio] /admin %s'):format(open and 'closing' or 'opening'))
-    if open then hide() else show() end
+    if open then
+        if StudioC.IplVisiting() then CreateThread(function() StudioC.IplLeave() end) end
+        hide()
+    else
+        show()
+    end
 end, false)
 
 TriggerEvent('chat:addSuggestion', '/admin', 'DPS Studio: rooms, furniture, shells, spots and doors (admin)')
@@ -250,7 +313,30 @@ local function tpTo(x, y, z, h, roomName)
     CreateThread(function() StudioC.Move(vec3(x, y, z), h, roomName) end)
 end
 
+-- Checks every library model once per session and tells the page which ones this game cannot
+-- spawn, so the list never offers a dead entry. Runs in small steps so it never stutters.
+local libChecked = false
+local function checkLibrary()
+    if libChecked then return end
+    libChecked = true
+    CreateThread(function()
+        local ok, data = pcall(json.decode, LoadResourceFile(GetCurrentResourceName(), 'html/library.json') or '')
+        if not ok or type(data) ~= 'table' then return end
+        local bad, n = {}, 0
+        for _, g in ipairs(data.groups or {}) do
+            for _, it in ipairs(g.items or {}) do
+                n = n + 1
+                if not IsModelInCdimage(joaat(it[1])) then bad[#bad + 1] = it[1] end
+                if n % 600 == 0 then Wait(0) end
+            end
+        end
+        print(('[dps-studio] library: %d models, %d not in this game'):format(n, #bad))
+        nui({ action = 'libBad', names = bad })
+    end)
+end
+
 RegisterNUICallback('boot', function(_, cb)
+    checkLibrary()
     local b = boot or lib.callback.await('dps-studio:boot', false)
     if not b then return cb({ ok = false }) end
     local shells = type(b.shells) == 'table' and b.shells or {}
@@ -262,12 +348,14 @@ end)
 
 RegisterNUICallback('close', function(_, cb)
     if pv.on then previewStop() end
+    if StudioC.IplVisiting() then CreateThread(function() StudioC.IplLeave() end) end
     pick = nil
     hide()
     cb({ ok = true })
 end)
 
 RegisterNUICallback('tab', function(d, cb)
+    if StudioC.Unlight then StudioC.Unlight() end
     tab = d.tab or tab
     if tab ~= 'shells' and pv.on then previewStop() end
     cb({ ok = true, here = StudioC.RoomHere() })
@@ -311,7 +399,8 @@ RegisterNUICallback('roomNew', function(d, cb)
         if cache.vehicle then return cb({ ok = false, err = 'Get out of the vehicle first' }) end
         entrance = mySpot()
     end
-    pick = { name = d.name, label = d.label, entrance = entrance, redo = d.keepDoor == true }
+    pick = { name = d.name, label = d.label, entrance = entrance, redo = d.keepDoor == true,
+             access = Studio.CleanAccess(d.access or (d.keepDoor and StudioC.rooms[d.name] and StudioC.rooms[d.name].data.access) or nil) }
     cb({ ok = true })
 end)
 
@@ -350,6 +439,197 @@ RegisterNUICallback('place', function(d, cb)
         StudioC.Place(name, d.model)
         show('place')
     end)
+end)
+
+-- ---------------------------------------------------------------- NUI: the piece selector
+local lit   -- the entity outlined for the selected row
+
+local function pieceEnt(room, id)
+    for ent, info in pairs(StudioC.pieceByEntity) do
+        if info.name == room and info.id == id and DoesEntityExist(ent) then return ent, info end
+    end
+end
+
+local function unlight()
+    if lit and DoesEntityExist(lit) then SetEntityDrawOutline(lit, false) end
+    lit = nil
+end
+StudioC.Unlight = unlight
+
+RegisterNUICallback('ipls', function(_, cb) cb(StudioC.IplCatalogue()) end)
+
+-- ---------------------------------------------------------------- NUI: doors
+RegisterNUICallback('doorPickers', function(_, cb) cb(lib.callback.await('dps-studio:doorPickers', false) or {}) end)
+RegisterNUICallback('doorsList', function(_, cb) cb(lib.callback.await('dps-studio:doors', false) or {}) end)
+RegisterNUICallback('doorSave', function(d, cb) cb(call('dps-studio:doorSave', tonumber(d.id), d.f)) end)
+RegisterNUICallback('roomAccess', function(d, cb) cb(call('dps-studio:roomAccess', d.name, d.access)) end)
+
+RegisterNUICallback('doorNew', function(d, cb)
+    local name = Studio.CleanLabel(d.name, 40)
+    if not name then return cb({ ok = false, err = 'Door name: 1 to 40 letters' }) end
+    leave()
+    cb({ ok = true })
+    CreateThread(function()
+        local shape = StudioC.PickDoor('New door: ' .. name)
+        if shape then
+            local ok, res = StudioC.CreateDoor(shape, name, d.access, { locked = d.locked ~= false })
+            notify(ok == true, ok and (res .. ' is saved in the door system') or (res or 'Door not saved'))
+        end
+        show('doors')
+    end)
+end)
+
+RegisterNUICallback('doorRemove', function(d, cb)
+    local ok, err = StudioC.RemoveDoor(tonumber(d.id))
+    cb({ ok = ok, err = err })
+end)
+
+RegisterNUICallback('doorGo', function(d, cb)
+    local x, y, z = tonumber(d.x), tonumber(d.y), tonumber(d.z)
+    if not (x and y and z) then return cb({ ok = false }) end
+    leave()
+    tpTo(x, y, z, 0.0)
+    cb({ ok = true })
+end)
+
+RegisterNUICallback('doorRestore', function(d, cb)
+    local ok, err = StudioC.RestoreDoor(tonumber(d.id))
+    cb({ ok = ok, err = err })
+end)
+
+-- "Use a place I go to": the panel closes, the admin gets to any interior or map by any means,
+-- stands where people should arrive and presses G. The room is then that place in the world.
+local placeWalking = false
+RegisterNUICallback('placeWalk', function(_, cb)
+    if not pick then return cb({ ok = false, err = 'Start a new room first' }) end
+    if pv.on then previewStop() end
+    cb({ ok = true })
+    hide()
+    placeWalking = true
+    nui({ action = 'keys', title = 'Go to the place for ' .. pick.label, keys = {
+        { 'Walk, drive or /tp', 'get there' }, { 'G', 'the way out is here' }, { 'Backspace', 'stop' } } })
+    CreateThread(function()
+        local calm = GetGameTimer() + 300
+        while placeWalking do
+            DisableControlAction(0, 47, true); DisableControlAction(0, 194, true); DisableControlAction(0, 177, true)
+            if GetGameTimer() < calm then
+                -- wait out the click that started this
+            elseif IsDisabledControlJustPressed(0, 47) and pick and not cache.vehicle then
+                local ped = cache.ped
+                local p = GetEntityCoords(ped)
+                local d = { kind = 'ipl', ipl = Studio.PlaceKey(p), style = { preset = 'default' }, access = pick.access,
+                            name = pick.name, label = pick.label, entrance = pick.entrance, redo = pick.redo == true,
+                            exit = { x = p.x, y = p.y, z = p.z, h = GetEntityHeading(ped) } }
+                local ok, err = lib.callback.await('dps-studio:roomCreate', false, d)
+                if ok then
+                    placeWalking = false
+                    local made = pick
+                    pick = nil
+                    nui({ action = 'keys' })
+                    -- the doors of the place: each one goes into ox_doorlock with the same access
+                    local n = 0
+                    while true do
+                        local shape = StudioC.PickDoor(('Doors of %s: pick one, Backspace when done'):format(made.label))
+                        if not shape then break end
+                        n = n + 1
+                        local okD, errD = StudioC.CreateDoor(shape, ('%s door %d'):format(made.label, n), made.access,
+                            { locked = not (made.access and made.access.open) }, made.name)
+                        if not okD then notify(false, errD or 'Door not saved') end
+                    end
+                    notify(true, ('%s is ready with %d door%s.'):format(d.label, n, n == 1 and '' or 's'))
+                else
+                    notify(false, err or 'Not saved')
+                end
+            elseif IsDisabledControlJustPressed(0, 194) or IsDisabledControlJustPressed(0, 177) then
+                placeWalking = false
+                nui({ action = 'keys' })
+                show('rooms')
+            end
+            Wait(0)
+        end
+    end)
+end)
+
+RegisterNUICallback('iplVisit', function(d, cb)
+    if type(d.export) ~= 'string' then return cb({ ok = false }) end
+    if pv.on then previewStop() end
+    cb({ ok = true })
+    CreateThread(function()
+        hide()
+        local ok, err = StudioC.IplVisit(d.export, d.style)
+        if not ok then notify(false, err); return show('shells') end
+        iplWalk()
+    end)
+end)
+
+RegisterNUICallback('iplStyle', function(d, cb)
+    if type(d.export) == 'string' then StudioC.IplRestyle(d.export, d.style) end
+    cb({ ok = true })
+end)
+
+RegisterNUICallback('roomStyle', function(d, cb) cb(call('dps-studio:lookStyle', d.name, d.style)) end)
+
+RegisterNUICallback('thumbs', function(_, cb) cb(lib.callback.await('dps-studio:thumbs', false) or {}) end)
+
+RegisterNUICallback('hide', function(d, cb) cb(call('dps-studio:hide', d.model, d.on == true)) end)
+
+RegisterNUICallback('booth', function(d, cb)
+    local list = type(d.models) == 'table' and d.models or {}
+    if #list == 0 then return cb({ ok = false, err = 'Every piece here already has a picture' }) end
+    if GetResourceState('screencapture') ~= 'started' then return cb({ ok = false, err = 'The photo booth needs screencapture running' }) end
+    leave()
+    cb({ ok = true })
+    CreateThread(function()
+        StudioC.Booth(list)
+        show('place')
+    end)
+end)
+
+RegisterNUICallback('pieces', function(_, cb)
+    local room = StudioC.RoomHere()
+    if not room then return cb({ ok = false, err = 'Go into a room first' }) end
+    local me = GetEntityCoords(cache.ped)
+    local out = {}
+    for ent, info in pairs(StudioC.pieceByEntity) do
+        if info.name == room and DoesEntityExist(ent) then
+            out[#out + 1] = { id = info.id, model = info.model, dist = math.floor(#(GetEntityCoords(ent) - me) * 10 + 0.5) / 10 }
+        end
+    end
+    table.sort(out, function(a, b) return a.dist < b.dist end)
+    cb({ ok = true, room = room, pieces = out })
+end)
+
+RegisterNUICallback('highlight', function(d, cb)
+    unlight()
+    local room = StudioC.RoomHere()
+    local ent = room and pieceEnt(room, tonumber(d.id))
+    if ent then
+        SetEntityDrawOutlineColor(255, 122, 69, 255)
+        SetEntityDrawOutline(ent, true)
+        lit = ent
+    end
+    cb({ ok = ent ~= nil })
+end)
+
+RegisterNUICallback('pieceMove', function(d, cb)
+    local room = StudioC.RoomHere()
+    local ent, info = room and pieceEnt(room, tonumber(d.id))
+    if not ent then return cb({ ok = false, err = 'That piece is gone' }) end
+    unlight()
+    leave()
+    cb({ ok = true })
+    CreateThread(function()
+        StudioC.Place(room, info.model, info.id, GetEntityHeading(ent), ent)
+        show('place')
+    end)
+end)
+
+RegisterNUICallback('pieceRemove', function(d, cb)
+    local room = StudioC.RoomHere()
+    local r = room and StudioC.rooms[room]
+    if not r then return cb({ ok = false, err = 'Go into a room first' }) end
+    unlight()
+    cb(call('dps-studio:pieceRemove', room, tonumber(d.id), r.data.look))
 end)
 
 RegisterNUICallback('edit', function(_, cb)

@@ -67,21 +67,45 @@ function Studio.ParseFurniture(src, imagePath, vec)
     if debug and debug.sethook then debug.sethook(co, function() error('furniture file ran too long') end, '', 5e7) end
     local ok = coroutine.resume(co)
     if not ok or coroutine.status(co) ~= 'dead' then return cats, models end
-    for key, c in pairs(type(env.Config.Furniture) == 'table' and env.Config.Furniture or {}) do
-        local items = {}
+    -- A piece may sit in several groups (the vendor file repeats them), so duplicates are only
+    -- dropped inside a group. Groups holding exactly the same pieces are shown once, with all
+    -- their names ("Table · PC table · Couch table").
+    local keys = {}
+    for key in pairs(type(env.Config.Furniture) == 'table' and env.Config.Furniture or {}) do keys[#keys + 1] = tostring(key) end
+    table.sort(keys)
+    local bySig = {}
+    for _, key in ipairs(keys) do
+        local c = env.Config.Furniture[key]
+        local items, seen, objs = {}, {}, {}
         for _, it in ipairs(type(c) == 'table' and type(c.items) == 'table' and c.items or {}) do
             local obj = type(it) == 'table' and it.object or nil
-            if type(obj) == 'string' and obj:match('^[%w_%-]+$') and not models[obj] then
+            if type(obj) == 'string' and obj:match('^[%w_%-]+$') and not seen[obj] then
+                seen[obj] = true
                 models[obj] = true
+                objs[#objs + 1] = obj
                 items[#items + 1] = { object = obj, label = tostring(it.label or obj), img = type(it.img) == 'string' and it.img or nil }
             end
         end
         if #items > 0 then
-            table.sort(items, function(a, b) return a.label < b.label end)
-            cats[#cats + 1] = { key = tostring(key), label = tostring(c.label or key), items = items }
+            table.sort(objs)
+            local sig = table.concat(objs, ',')
+            local label = tostring(type(c) == 'table' and c.label or key)
+            local same = bySig[sig]
+            if same then
+                if not same.names[label] then
+                    same.names[label] = true
+                    same.label = same.label .. ' · ' .. label
+                end
+            else
+                table.sort(items, function(x, y) return x.label < y.label end)
+                local cat = { key = key, label = label, items = items, names = { [label] = true } }
+                bySig[sig] = cat
+                cats[#cats + 1] = cat
+            end
         end
     end
-    table.sort(cats, function(a, b) return a.label < b.label end)
+    for _, c in ipairs(cats) do c.names = nil end
+    table.sort(cats, function(x, y) return x.label < y.label end)
     return cats, models
 end
 
@@ -102,10 +126,61 @@ function Studio.ValidPiece(p, models)
     return true
 end
 
+---An interior style: which bob74 look an interior room shows.
+---preset: 'default' (bob74's own), 'full' (everything on), 'empty' (all extras off), 'custom'.
+---choice[group] = option key (one per group); on[group][option] = true (toggle groups).
+local PRESETS = { default = true, full = true, empty = true, custom = true }
+local function word(v) return type(v) == 'string' and #v > 0 and #v <= 48 and not v:find('[%c<>]') end
+function Studio.CleanStyle(st)
+    if type(st) ~= 'table' then return { preset = 'default' } end
+    local out = { preset = PRESETS[st.preset] and st.preset or 'default', choice = {}, on = {} }
+    local n = 0
+    for g, o in pairs(type(st.choice) == 'table' and st.choice or {}) do
+        n = n + 1
+        if n > 40 then break end
+        if word(g) and word(o) then out.choice[g] = o end
+    end
+    n = 0
+    for g, set in pairs(type(st.on) == 'table' and st.on or {}) do
+        n = n + 1
+        if n > 40 then break end
+        if word(g) and type(set) == 'table' then
+            local t, m = {}, 0
+            for k, v in pairs(set) do
+                m = m + 1
+                if m > 60 then break end
+                if word(k) and v == true then t[k] = true end
+            end
+            out.on[g] = t
+        end
+    end
+    return out
+end
+
+local function copyStyle(st) return st and Studio.CleanStyle(st) or nil end
+
 local function copyPieces(list)
     local out = {}
     for i, q in ipairs(list or {}) do out[i] = { id = q.id, model = q.model, x = q.x, y = q.y, z = q.z, h = q.h } end
     return out
+end
+
+---An interior room either names a bob74 interior, or is simply a place in the world:
+---'at:x,y,z' (rounded to whole metres), for any interior or map the admin walked to.
+function Studio.IsPlaceKey(s)
+    return type(s) == 'string' and #s <= 40 and s:match('^at:%-?%d+,%-?%d+,%-?%d+$') ~= nil
+end
+
+function Studio.PlaceKey(p)
+    return ('at:%d,%d,%d'):format(math.floor(p.x + 0.5), math.floor(p.y + 0.5), math.floor(p.z + 0.5))
+end
+
+---A fresh interior (IPL) room: the way out is a spot inside the interior in world terms.
+function Studio.NewIplRoom(name, label, ipl, entrance, exit, style)
+    local room = Studio.NewRoom(name, label, nil, entrance, exit)
+    room.kind, room.ipl = 'ipl', ipl
+    room.looks[1].style = Studio.CleanStyle(style)
+    return room
 end
 
 ---A fresh room with one empty look called Default.
@@ -134,7 +209,8 @@ function Studio.AddLook(room, name, copyFrom)
         if l.name:lower() == name:lower() then return nil, 'That look name is taken' end
     end
     local src = copyFrom and Studio.FindLook(room, copyFrom)
-    local look = { id = room.nextLook, name = name, pieces = src and copyPieces(src.pieces) or {}, nextPiece = src and src.nextPiece or 1 }
+    local look = { id = room.nextLook, name = name, pieces = src and copyPieces(src.pieces) or {}, nextPiece = src and src.nextPiece or 1,
+                   style = src and copyStyle(src.style) or (room.kind == 'ipl' and { preset = 'default' } or nil) }
     room.nextLook = room.nextLook + 1
     room.looks[#room.looks + 1] = look
     return look
@@ -175,8 +251,10 @@ end
 ---What every player needs to run a room: door, way out, shell and the active look's pieces.
 function Studio.PublicRoom(room)
     local look = Studio.ActiveLook(room)
-    return { name = room.name, label = room.label, shell = room.shell, entrance = room.entrance, exit = room.exit,
-             look = look and look.id or nil, pieces = look and copyPieces(look.pieces) or {} }
+    return { name = room.name, label = room.label, shell = room.shell, kind = room.kind or 'shell', ipl = room.ipl,
+             entrance = room.entrance, exit = room.exit, look = look and look.id or nil,
+             access = room.access and Studio.CleanAccess(room.access) or { open = true },
+             style = look and copyStyle(look.style) or nil, pieces = look and copyPieces(look.pieces) or {} }
 end
 
 ---What the admin panel lists for a room.
@@ -184,7 +262,9 @@ function Studio.RoomSummary(room)
     local looks = {}
     for i, l in ipairs(room.looks) do looks[i] = { id = l.id, name = l.name, count = #l.pieces } end
     local active = Studio.ActiveLook(room)
-    return { name = room.name, label = room.label, shell = room.shell, entrance = room.entrance, exit = room.exit,
+    return { name = room.name, label = room.label, shell = room.shell, kind = room.kind or 'shell', ipl = room.ipl,
+             style = active and copyStyle(active.style) or nil, entrance = room.entrance, exit = room.exit,
+             access = room.access and Studio.CleanAccess(room.access) or { open = true }, doors = room.doors or {},
              look = room.look, lookName = active and active.name or '', count = active and #active.pieces or 0,
              max = Studio.MAX_PIECES, looks = looks, updatedBy = room.updatedBy, updatedAt = room.updatedAt }
 end
@@ -193,11 +273,18 @@ end
 ---Refuses a room whose shell or spots are wrong; drops pieces not in the catalogue.
 ---models may be nil when the catalogue is not loaded: then pieces are kept as they are.
 ---@return table|nil room, string|nil err, integer dropped
-function Studio.CleanRoom(room, shellSet, models)
+function Studio.CleanRoom(room, shellSet, models, iplSet)
     if type(room) ~= 'table' then return nil, 'Unreadable room', 0 end
-    if type(room.shell) ~= 'string' or not shellSet[room.shell] then return nil, 'Its shell is not in the housing list', 0 end
+    if room.kind == 'ipl' then
+        if type(room.ipl) ~= 'string' or not ((iplSet or {})[room.ipl] or Studio.IsPlaceKey(room.ipl)) then return nil, 'Its interior is not in the list', 0 end
+        if not Studio.ValidSpot(room.exit) then return nil, 'Bad way out', 0 end
+    else
+        room.kind = nil
+        if type(room.shell) ~= 'string' or not shellSet[room.shell] then return nil, 'Its shell is not in the housing list', 0 end
+        if not Studio.ValidOffset(room.exit) then return nil, 'Bad way out', 0 end
+    end
     if not Studio.CleanName(room.name) or type(room.label) ~= 'string' then return nil, 'Bad name', 0 end
-    if not Studio.ValidSpot(room.entrance) or not Studio.ValidOffset(room.exit) then return nil, 'Bad door or way out', 0 end
+    if not Studio.ValidSpot(room.entrance) then return nil, 'Bad door', 0 end
     if type(room.looks) ~= 'table' or #room.looks == 0 then return nil, 'No looks', 0 end
     local dropped = 0
     for _, l in ipairs(room.looks) do
@@ -212,9 +299,61 @@ function Studio.CleanRoom(room, shellSet, models)
         end
         l.pieces = keep
         l.nextPiece = math.max(tonumber(l.nextPiece) or 1, top + 1)
+        l.style = room.kind == 'ipl' and Studio.CleanStyle(l.style) or nil
     end
     if not Studio.FindLook(room, room.look) then room.look = room.looks[1].id end
     return room, nil, dropped
+end
+
+---Who may open a door (ox_doorlock door or a Studio room door). Anyone who matches ANY part:
+---groups[job or gang] = lowest grade, items = key item names, characters = citizen ids,
+---staff = admins, passcode. open = true means everyone, and wins over the rest.
+function Studio.CleanAccess(a)
+    if type(a) ~= 'table' then return { open = true } end
+    local out = { open = a.open == true, staff = a.staff == true, groups = {}, items = {}, characters = {} }
+    local n = 0
+    for g, grade in pairs(type(a.groups) == 'table' and a.groups or {}) do
+        n = n + 1
+        if n > 40 then break end
+        if type(g) == 'string' and g:match('^[%w_%-]+$') and #g <= 40 then
+            out.groups[g] = math.max(0, math.min(50, math.floor(tonumber(grade) or 0)))
+        end
+    end
+    for i, it in ipairs(type(a.items) == 'table' and a.items or {}) do
+        if i > 20 then break end
+        if type(it) == 'string' and it:match('^[%w_%-]+$') and #it <= 60 then out.items[#out.items + 1] = it end
+    end
+    for i, c in ipairs(type(a.characters) == 'table' and a.characters or {}) do
+        if i > 40 then break end
+        if type(c) == 'string' and c:match('^[%w]+$') and #c <= 20 then out.characters[#out.characters + 1] = c end
+    end
+    if type(a.passcode) == 'string' and a.passcode:match('^[%w]+$') and #a.passcode <= 12 then out.passcode = a.passcode end
+    return out
+end
+
+---The ox_doorlock fields for an access. '' clears a field in ox_doorlock's editDoor.
+function Studio.AccessToOx(a)
+    a = Studio.CleanAccess(a)
+    if a.open then return { groups = '', items = '', characters = '', passcode = '' } end
+    return {
+        groups = next(a.groups) and a.groups or '',
+        items = #a.items > 0 and a.items or '',
+        characters = #a.characters > 0 and a.characters or '',
+        passcode = a.passcode or '',
+    }
+end
+
+---Whether a player (job, grade, gang, gang grade, citizen id, has(item), isStaff) passes an access.
+function Studio.AccessAllows(a, who)
+    a = Studio.CleanAccess(a)
+    if a.open then return true end
+    if a.staff and who.staff then return true end
+    for g, grade in pairs(a.groups) do
+        if (who.job == g and (who.grade or 0) >= grade) or (who.gang == g and (who.gangGrade or 0) >= grade) then return true end
+    end
+    for _, c in ipairs(a.characters) do if c == who.citizenid then return true end end
+    for _, it in ipairs(a.items) do if who.has and who.has(it) then return true end end
+    return false
 end
 
 ---Deep copy through plain tables (rooms hold only strings, numbers, booleans and tables).
