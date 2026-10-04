@@ -23,7 +23,7 @@
 
   const S = { tab: 'rooms', boot: null, rooms: [], spots: [], hist: [], scans: [], here: null, pick: null,
               items: [], sel: -1, open: false, chip: { place: 'all', lib: 'lighting', shells: 'all', spots: 'all' }, q: {}, shellTimer: null, shown: false, pv: null,
-              src: 'decorate', lib: null, bad: new Set(), more: 0, pieces: [], thumbs: {},
+              src: 'decorate', lib: null, bad: new Set(), more: 0, pieces: [], thumbs: {}, hidden: {}, showHidden: false,
               shellSrc: 'shells', ipls: null, iplStyle: {}, styling: null, doors: [], pickers: null, acc: {} };
   const iplLabel = (exp) => { if (/^at:/.test(exp || '')) return 'a place in the world (' + exp.slice(3) + ')'; const e = (S.ipls || []).find((x) => x.export === exp); return e ? e.label : exp; };
   const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};   // an empty Lua table arrives as []
@@ -114,9 +114,10 @@
             if (!searching && S.chip.lib !== 'all' && S.chip.lib !== g.key) continue;
             for (const it of g.items) {
               if (it.use !== S.src || S.bad.has(it.m)) continue;
+              if (!!S.hidden[it.m] !== S.showHidden) continue;   // hidden for every admin (dps_studio_hidden)
               if (searching && !words.every((w) => it.hay.includes(w))) continue;
               if (out.length >= LIB_CAP) { S.more++; continue; }
-              out.push({ object: it.m, label: it.label, cat: g.label, gkey: g.key, src: it.src, lib: true });
+              out.push({ object: it.m, label: it.label, cat: g.label, gkey: g.key, src: it.src, lib: true, hid: S.hidden[it.m] });
             }
           }
           return out;
@@ -162,6 +163,7 @@
       thumb = pic ? `<img src="${esc(pic)}" alt="" loading="lazy">` : `<i class="fa-solid ${it.lib ? (LIB_ICON[it.gkey] || 'fa-cube') : 'fa-couch'}"></i>`;
       nm = esc(it.label);
       mt = it.piece ? `<code>${esc(it.object)}</code> · ${it.dist} m from you` : `<code>${esc(it.object)}</code> · ${esc(it.cat)}${it.lib ? ' · ' + esc(it.src === 'Game' ? 'game' : it.src) : ''}`;
+      if (it.hid) rt = `<span class="badge">${it.hid === 'empty' ? 'Empty photo' : it.hid === 'big' ? 'Too big' : it.hid === 'failed' ? 'Will not load' : 'Hidden'}</span>`;
       if (it.piece) thumb = '<i class="fa-solid fa-location-crosshairs"></i>';
     } else if (tab === 'shells' && it.ipl) {
       thumb = '<i class="fa-solid fa-building"></i>';
@@ -214,6 +216,8 @@
         <p>Last change: ${esc(it.updatedBy || '-')} · ${esc(it.updatedAt || '-')}</p></div>`;
     }
     if (tab === 'place' && it.piece) return `<div class="det"><p>This piece is lit up orange in the room.</p><div class="acts"><button class="pri" data-a="pieceMove">Move it <kbd>Enter</kbd></button><button class="bad" data-a="pieceRemove">Remove <kbd>Delete</kbd></button><button data-a="copyName">Copy name</button></div></div>`;
+    if (tab === 'place' && it.lib && it.hid) return `<div class="det"><p>${it.hid === 'empty' ? 'The photo booth saw nothing when it framed this piece.' : it.hid === 'big' ? 'Over 12 m corner to corner, too big for a room.' : it.hid === 'failed' ? 'The game would not load it on its own, so it cannot be placed.' : 'Hidden from Place for every admin.'} It is still in the game, only left out of this list.</p><div class="acts"><button class="pri" data-a="unhide">Bring it back</button><button data-a="place">Place it anyway</button><button data-a="copyName">Copy name</button></div></div>`;
+    if (tab === 'place' && it.lib) return `<div class="det"><div class="acts"><button class="pri" data-a="place">Place it <kbd>Enter</kbd></button><button data-a="hide">Hide for everyone</button><button data-a="copyName">Copy name</button></div></div>`;
     if (tab === 'place') return `<div class="det"><div class="acts"><button class="pri" data-a="place">Place it <kbd>Enter</kbd></button><button data-a="copyName">Copy name</button></div></div>`;
     if (tab === 'shells' && it.ipl) {
       const st = styleOf(it.export);
@@ -278,7 +282,7 @@
     if (t === 'rooms') h = `<span class="grow">${S.rooms.length} rooms. A room is a door, a shell and saved looks of furniture.</span><button class="btn pri" data-a="newRoom">New room at my spot <kbd>N</kbd></button>`;
     else if (t === 'place') {
       const r = roomByName(S.here);
-      h = (r ? `<span class="grow"><b>${esc(r.label)}</b> · look <b>${esc(r.lookName)}</b></span>${pieceMeter(r.count, r.max)}<button class="btn" data-a="showPieces">Move or remove <kbd>M</kbd></button>` : '<span class="grow">Place</span>') + boothButton();
+      h = (r ? `<span class="grow"><b>${esc(r.label)}</b> · look <b>${esc(r.lookName)}</b></span>${pieceMeter(r.count, r.max)}<button class="btn" data-a="showPieces">Move or remove <kbd>M</kbd></button>` : '<span class="grow">Place</span>') + hiddenButton() + boothButton();
     } else if (t === 'shells') h = S.shellSrc === 'ipls'
       ? `<span class="grow">${S.ipls ? S.ipls.length : 0} game interiors. Each one serves one room.</span>`
       : `<span class="grow">${S.boot ? S.boot.shells.length : 0} shells from the housing list. The one you pick floats in the sky so open shells show from every side.</span>`;
@@ -288,9 +292,9 @@
     head.innerHTML = h;
 
     let c = '';
-    if (t === 'place' && S.here) {
-      const srcs = `<button class="chip src${S.src === 'pieces' ? ' on' : ''}" data-s="pieces"><i class="fa-solid fa-location-crosshairs"></i> In this room${S.pieces.length ? ' · ' + S.pieces.length : ''}</button><button class="chip src${S.src === 'decorate' ? ' on' : ''}" data-s="decorate"><i class="fa-solid fa-couch"></i> Decorate</button><button class="chip src${S.src === 'build' ? ' on' : ''}" data-s="build"><i class="fa-solid fa-trowel-bricks"></i> Build</button><button class="chip src${S.src === 'housing' ? ' on' : ''}" data-s="housing"><i class="fa-solid fa-image"></i> Housing furniture, with pictures</button><span class="brk"></span>`;
-      if (S.src === 'pieces') c = srcs;
+    if (t === 'place') {   // Decorate / Build / Housing work anywhere (the photo booth too); "In this room" needs a room
+      const srcs = `${S.here ? `<button class="chip src${S.src === 'pieces' ? ' on' : ''}" data-s="pieces"><i class="fa-solid fa-location-crosshairs"></i> In this room${S.pieces.length ? ' · ' + S.pieces.length : ''}</button>` : ''}<button class="chip src${S.src === 'decorate' ? ' on' : ''}" data-s="decorate"><i class="fa-solid fa-couch"></i> Decorate</button><button class="chip src${S.src === 'build' ? ' on' : ''}" data-s="build"><i class="fa-solid fa-trowel-bricks"></i> Build</button><button class="chip src${S.src === 'housing' ? ' on' : ''}" data-s="housing"><i class="fa-solid fa-image"></i> Housing furniture, with pictures</button><span class="brk"></span>`;
+      if (S.src === 'pieces' && S.here) c = srcs;
       else if ((S.src === 'decorate' || S.src === 'build') && S.lib) c = srcs + [['all', 'All']].concat(S.lib.groups.filter((g) => g.n[S.src] > 0).map((g) => [g.key, g.label])).map(([k, l]) => `<button class="chip${S.chip.lib === k && !q.value.trim() ? ' on' : ''}" data-c="${esc(k)}">${esc(l)}</button>`).join('') + (q.value.trim() ? '<span class="brk"></span><span class="hint2">Searching every group</span>' : '');
       else if (S.boot) c = srcs + [['all', 'All']].concat(S.boot.furniture.map((f) => [f.key, f.label])).map(([k, l]) => `<button class="chip${S.chip.place === k ? ' on' : ''}" data-c="${esc(k)}">${esc(l)}</button>`).join('');
       else c = srcs;
@@ -390,12 +394,21 @@
     post('tab', { tab: t }).then((r) => { if (r && r.here !== undefined) S.here = r.here || null; load(t); });
     render(same);
   }
+  // Packs added on 3 Oct 2026 (13 prop packs). While any of their pieces still has no picture,
+  // the booth shoots only those, Decorate and Build alike, so new furniture is not stuck behind
+  // thousands of older game props.
+  const BOOTH_NEW = new Set(['AEG_PROPS_livingroom-dubai', 'AEG_props_PetzAmsterda', 'AEG_props_PetzDublin', 'AEG_props_PetzLondon',
+    'BohoBathroom', 'Coffee', 'KillstorexQuasar_props', 'LunaticStudio_VanGogh', 'lunaticstudio23_bathroom_1',
+    'lunaticstudio23_kitchen_1', 'lunaticstudio23_kitchen_2', 'lunaticstudio23_kitchen_3', 'lunaticstudio23_office_1']);
   // pieces on the chosen side (Decorate or Build) that still have no picture
   function boothList() {
     if (!S.lib) return [];
+    const fresh = [];
+    for (const g of S.lib.groups) for (const it of g.items) if (BOOTH_NEW.has(it.src) && !S.bad.has(it.m) && !S.thumbs[it.m] && !S.hidden[it.m]) fresh.push(it.m);
+    if (fresh.length) return fresh;
     const side = S.src === 'build' ? 'build' : 'decorate';
     const out = [];
-    for (const g of S.lib.groups) for (const it of g.items) if (it.use === side && !S.bad.has(it.m) && !S.thumbs[it.m]) out.push(it.m);
+    for (const g of S.lib.groups) for (const it of g.items) if (it.use === side && !S.bad.has(it.m) && !S.thumbs[it.m] && !S.hidden[it.m]) out.push(it.m);
     return out;
   }
   function boothButton() {
@@ -403,19 +416,61 @@
     const need = boothList().length;
     return need ? `<button class="btn pri" data-a="booth"><i class="fa-solid fa-camera"></i>&nbsp;Take photos · ${need.toLocaleString('en-US')} to go</button>` : '<span class="badge on">Every piece has a photo</span>';
   }
-  function loadThumbs() { return post('thumbs').then((t) => { if (t && typeof t === 'object' && !Array.isArray(t)) S.thumbs = t; if (S.shown && S.tab === 'place') render(true); }); }
+  function hiddenButton() {
+    const n = Object.keys(S.hidden).length;
+    if (!S.lib || (S.src !== 'decorate' && S.src !== 'build') || (!n && !S.showHidden)) return '';
+    return `<button class="btn${S.showHidden ? ' on' : ''}" data-a="toggleHidden"><i class="fa-solid fa-eye-slash"></i>&nbsp;${S.showHidden ? 'Back to the list' : 'Hidden · ' + n.toLocaleString('en-US')}</button>`;
+  }
+  function loadThumbs() { return post('thumbs').then((t) => { if (t && typeof t === 'object' && !Array.isArray(t)) { S.thumbs = obj(t.thumbs); S.hidden = obj(t.hidden); } if (S.shown && S.tab === 'place') render(true); }); }
+  // Two-shot cut: the same view with and without the piece. Pixels that changed are the piece;
+  // the rest (the far-off clouds) becomes clear, with a soft edge. The game's exposure shifts a
+  // little between the two shots, so the bare shot is first matched to the first one's brightness
+  // (per colour, from the frame's edge, where the piece is not), and lone specks are dropped.
+  // Almost nothing changed means the frame held no piece.
+  function cutOut(px, bare) {
+    const W = 224, gain = [1, 1, 1];
+    for (let k = 0; k < 3; k++) {
+      const r = [];
+      for (let i = 0; i < W; i++) for (const [x, y] of [[i, 0], [i, 1], [i, W - 1], [i, W - 2], [0, i], [1, i], [W - 1, i], [W - 2, i]]) {
+        const o = (y * W + x) * 4; r.push((px[o + k] + 4) / (bare[o + k] + 4));
+      }
+      r.sort((a, b) => a - b); gain[k] = r[r.length >> 1];
+    }
+    const a = new Uint8ClampedArray(W * W);
+    for (let i = 0, o = 0; i < W * W; i++, o += 4) {
+      const d = Math.abs(px[o] - bare[o] * gain[0]) + Math.abs(px[o + 1] - bare[o + 1] * gain[1]) + Math.abs(px[o + 2] - bare[o + 2] * gain[2]);
+      a[i] = Math.max(0, Math.min(255, (d - 40) * 5));
+    }
+    let kept = 0;
+    for (let y = 0; y < W; y++) for (let x = 0; x < W; x++) {
+      const i = y * W + x;
+      let v = a[i];
+      if (v > 0) {   // a speck with no solid neighbours is noise, not the piece
+        let n = 0;
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { const yy = y + dy, xx = x + dx; if (yy >= 0 && yy < W && xx >= 0 && xx < W && a[yy * W + xx] > 128) n++; }
+        if (n < 3) v = 0;
+      }
+      px[i * 4 + 3] = v;
+      if (v > 128) kept++;
+    }
+    return kept / (W * W);
+  }
   // crop the middle of a full screenshot to a small square webp for the booth
-  function cropShot(model, dataUri) {
-    const img = new Image();
-    img.onload = () => {
+  function cropShot(model, dataUri, bareUri) {
+    const load = (src) => new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = src; });
+    const draw = (img) => {
       const side = Math.min(img.width, img.height) * 0.92, sx = (img.width - side) / 2, sy = (img.height - side) / 2;
       const c = document.createElement('canvas'); c.width = 224; c.height = 224;
-      c.getContext('2d').drawImage(img, sx, sy, side, side, 0, 0, 224, 224);
-      const out = c.toDataURL('image/webp', 0.78);
-      post('cropDone', { model, b64: out.slice(out.indexOf(',') + 1) });
+      const g = c.getContext('2d'); g.drawImage(img, sx, sy, side, side, 0, 0, 224, 224);
+      return { c, g, im: g.getImageData(0, 0, 224, 224) };
     };
-    img.onerror = () => post('cropDone', { model, b64: false });
-    img.src = dataUri;
+    Promise.all([load(dataUri), load(bareUri)]).then(([a, b]) => {
+      const A = draw(a), B = draw(b);
+      if (cutOut(A.im.data, B.im.data) < 0.003) { post('cropDone', { model, empty: true }); return; }
+      A.g.putImageData(A.im, 0, 0);
+      const out = A.c.toDataURL('image/webp', 0.8);
+      post('cropDone', { model, b64: out.slice(out.indexOf(',') + 1) });
+    }, () => post('cropDone', { model, b64: false }));
   }
   /* ---------- who can go in: one editor for doors, rooms and new rooms ---------- */
   const accCopy = (a) => {
@@ -654,13 +709,16 @@
         let list = boothList();
         const first = Object.keys(S.thumbs).length === 0;
         if (first) list = list.slice(0, 10);   // first run is a test of ten, to check the pictures look right
-        const mins = Math.ceil(list.length * 1.4 / 60);
+        const mins = Math.ceil(list.length * 2.4 / 60);   // two shots per piece
         const text = first
           ? 'First run: 10 pieces as a test, under a minute. Then look at their pictures in the list. If they look right, press Take photos again for the rest.'
           : `${list.length.toLocaleString('en-US')} pieces still need a picture, about ${mins} minutes. The panel closes and the booth runs on its own. Leave the game running. Backspace stops it, and it carries on next time.`;
         if (!await confirmBox('Photo booth', text, 'Start')) return;
         post('booth', { models: list }).then((r) => result(r)); return;
       }
+      case 'hide': if (it && it.lib) post('hide', { model: it.object, on: true }).then((r) => { if (result(r, 'Hidden from Place for every admin')) { S.hidden[it.object] = 'hand'; render(true); } }); return;
+      case 'unhide': if (it && it.lib) post('hide', { model: it.object, on: false }).then((r) => { if (result(r, 'Back in Place')) { delete S.hidden[it.object]; render(true); } }); return;
+      case 'toggleHidden': S.showHidden = !S.showHidden; S.sel = -1; S.open = false; render(true); return;
       case 'pieceMove': if (it && it.piece) post('pieceMove', { id: it.id }).then((r) => result(r)); return;
       case 'pieceRemove': if (it && it.piece) post('pieceRemove', { id: it.id }).then((r) => { if (result(r, 'Removed. History can put it back.')) loadPieces(); }); return;
       case 'place': if (it) post('place', { model: it.object }).then((r) => result(r)); return;
@@ -845,7 +903,7 @@
         }))
           .then(() => { setTab(m.tab || store('dps-studio-tab', 'rooms')); list.focus(); });
         break;
-      case 'crop': if (m.model && m.data) cropShot(m.model, m.data); break;
+      case 'crop': if (m.model && m.data && m.bare) cropShot(m.model, m.data, m.bare); break;
       case 'libBad': S.bad = new Set(Array.isArray(m.names) ? m.names : []); if (S.shown && S.tab === 'place') render(true); break;
       case 'hide': S.shown = false; clearTimeout(S.shellTimer); closeModal(); app.hidden = true; stage.hidden = true; break;
       case 'keys': showKeys(m); break;

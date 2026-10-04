@@ -571,6 +571,8 @@ RegisterNUICallback('roomStyle', function(d, cb) cb(call('dps-studio:lookStyle',
 
 RegisterNUICallback('thumbs', function(_, cb) cb(lib.callback.await('dps-studio:thumbs', false) or {}) end)
 
+RegisterNUICallback('hide', function(d, cb) cb(call('dps-studio:hide', d.model, d.on == true)) end)
+
 RegisterNUICallback('booth', function(d, cb)
     local list = type(d.models) == 'table' and d.models or {}
     if #list == 0 then return cb({ ok = false, err = 'Every piece here already has a picture' }) end

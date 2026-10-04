@@ -93,6 +93,12 @@ local TABLES = {
         url VARCHAR(400) NOT NULL,
         at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         PRIMARY KEY (model))]],
+    [[CREATE TABLE IF NOT EXISTS dps_studio_hidden (
+        model VARCHAR(96) NOT NULL,
+        reason VARCHAR(16) NOT NULL DEFAULT 'hand',
+        by_name VARCHAR(64) DEFAULT NULL,
+        at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (model))]],
     [[CREATE TABLE IF NOT EXISTS dps_studio_doors (
         id INT NOT NULL,
         staff TINYINT NOT NULL DEFAULT 0,
@@ -540,15 +546,28 @@ end)
 -- and keeps the picture link here. Players never download the pictures; the panel shows them.
 local FM_URL = 'https://api.fivemanage.com/api/v3/file/base64'
 local thumbs = {}   -- model -> url
+local hidden = {}   -- model -> 'empty' (the booth saw nothing), 'big' (too big for a room) or 'hand' (an admin hid it): left out of Place for every admin
 local busyUpload = {}
 
 CreateThread(function()
     while not ready do Wait(500) end
     for _, row in ipairs(MySQL.query.await('SELECT model, url FROM dps_studio_thumbs') or {}) do thumbs[row.model] = row.url end
-    local n = 0
+    for _, row in ipairs(MySQL.query.await('SELECT model, reason FROM dps_studio_hidden') or {}) do hidden[row.model] = row.reason end
+    local n, h = 0, 0
     for _ in pairs(thumbs) do n = n + 1 end
-    lib.print.info(('photos: %d on file'):format(n))
+    for _ in pairs(hidden) do h = h + 1 end
+    lib.print.info(('photos: %d on file, %d pieces hidden'):format(n, h))
 end)
+
+local function setHidden(src, model, reason)
+    if reason then
+        hidden[model] = reason
+        MySQL.query.await('INSERT INTO dps_studio_hidden (model, reason, by_name) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE reason = VALUES(reason), by_name = VALUES(by_name)', { model, reason, who(src) })
+    else
+        hidden[model] = nil
+        MySQL.query.await('DELETE FROM dps_studio_hidden WHERE model = ?', { model })
+    end
+end
 
 -- One picture of the asking admin's game view, through screencapture (already on the server
 -- for qs-housing). Returns a data URI of a 960 x 540 webp, or false.
@@ -568,7 +587,28 @@ end)
 
 lib.callback.register('dps-studio:thumbs', function(src)
     if not allowed(src) then return nil end
-    return thumbs
+    return { thumbs = thumbs, hidden = hidden }
+end)
+
+-- Hide (or bring back) a library piece for every admin. Kept in dps_studio_hidden.
+lib.callback.register('dps-studio:hide', function(src, model, on)
+    if not allowed(src) then return false, 'Studio is for admins' end
+    local _, models = furniture()
+    if type(model) ~= 'string' or not models[model] then return false, 'Not a library piece' end
+    setHidden(src, model, on and 'hand' or nil)
+    lib.print.info(('%s %s %s'):format(who(src), on and 'hid' or 'brought back', model))
+    return true
+end)
+
+-- The booth framed a piece and nothing was left once the green was cut out (the piece does not
+-- spawn as a whole on its own), or it is too big for any room: it is left out of Place
+-- (reason 'empty' or 'big'; the Hidden view can undo).
+lib.callback.register('dps-studio:thumbEmpty', function(src, model, why)
+    if not allowed(src) then return false, 'Studio is for admins' end
+    local _, models = furniture()
+    if type(model) ~= 'string' or not models[model] then return false, 'Not a library piece' end
+    if hidden[model] ~= 'hand' then setHidden(src, model, (why == 'big' or why == 'failed') and why or 'empty') end
+    return true
 end)
 
 lib.callback.register('dps-studio:thumbSave', function(src, model, b64)
@@ -580,9 +620,11 @@ lib.callback.register('dps-studio:thumbSave', function(src, model, b64)
     if key == '' then return false, 'No Fivemanage key on the server' end
     if busyUpload[model] then return false, 'Already sending that one' end
     busyUpload[model] = true
-    local p = promise.new()
+    local p, settled = promise.new(), false
+    local function settle(v) if not settled then settled = true; p:resolve(v) end end
+    SetTimeout(15000, function() settle({ code = 0, body = 'no answer from Fivemanage in 15 s' }) end)   -- never hang the booth on one upload
     PerformHttpRequest(FM_URL, function(code, body)
-        p:resolve({ code = code, body = body })
+        settle({ code = code, body = body })
     end, 'POST', json.encode({ base64 = 'data:image/webp;base64,' .. b64, filename = model .. '.webp', path = 'dps-studio/thumbs', metadata = json.encode({ model = model }) }),
         { ['Content-Type'] = 'application/json', ['Authorization'] = key })
     local res = Citizen.Await(p)

@@ -1,8 +1,10 @@
 -- CLIENT (admin). The photo booth: one picture of every library piece.
--- Each piece is set up alone high over the sea at midday, framed to fill the shot, and
--- taken by screencapture (the server's screenshot tool, game view only) at the server's
--- request. The Studio page crops it to a
--- small square webp, and the server puts it on Fivemanage. Backspace stops; the next run
+-- Each piece is set up alone high over the sky at midday, framed to fill the shot from its
+-- front, and taken twice by screencapture (the server's screenshot tool, game view only): once
+-- with the piece, once without it half a second later. The Studio page keeps only what changed
+-- between the two (the piece; the far-off clouds stay the same), crops it to a small square webp
+-- with a clear background, and the server puts it on Fivemanage. A frame where nothing changed,
+-- and any piece bigger than BIG metres corner to corner, is left out of Place instead. Backspace stops; the next run
 -- carries on from the pieces that still have no picture.
 
 StudioC = StudioC or {}
@@ -14,7 +16,7 @@ local backSpot   -- where the player stood, for a resource stop mid-run
 local cropWait
 
 RegisterNUICallback('cropDone', function(d, cb)
-    if cropWait and d and d.model == cropWait.model then cropWait.settle(type(d.b64) == 'string' and d.b64 or false) end
+    if cropWait and d and d.model == cropWait.model then cropWait.settle(d.empty == true and 'empty' or type(d.b64) == 'string' and d.b64 or false) end
     cb({ ok = true })
 end)
 
@@ -24,29 +26,33 @@ local function shoot()
     return lib.callback.await('dps-studio:shoot', false)
 end
 
-local function crop(model, dataUri)
+local function crop(model, dataUri, emptyUri)
     local p, settled = promise.new(), false
     local function settle(v) if not settled then settled = true; p:resolve(v) end end
     cropWait = { model = model, settle = settle }
-    SendNUIMessage({ action = 'crop', model = model, data = dataUri })
+    SendNUIMessage({ action = 'crop', model = model, data = dataUri, bare = emptyUri })
     SetTimeout(6000, function() settle(false) end)
     local b64 = Citizen.Await(p)
     cropWait = nil
     return b64
 end
 
+local BIG = 12.0        -- pieces larger than this (metres, corner to corner) are not photographed
+
 local function frame(cam, obj, hash)
     local mn, mx = GetModelDimensions(hash)
     local centre = GetOffsetFromEntityInWorldCoords(obj, (mn.x + mx.x) / 2, (mn.y + mx.y) / 2, (mn.z + mx.z) / 2)
     local size = math.max(0.25, #(mx - mn))
     local dist = (size / 2) / math.tan(math.rad(FOV / 2)) / 0.82
-    -- from the front and a little to the right and above: the usual shop-photo angle
-    local dir = vec3(math.sin(math.rad(35.0)), math.cos(math.rad(35.0)), 0.38)
+    -- from the front and a little to the side and above: the usual shop-photo angle. A prop's
+    -- front faces -Y (its back faces +Y: decals read mirrored from there), so the camera sits on -Y.
+    local dir = vec3(math.sin(math.rad(35.0)), -math.cos(math.rad(35.0)), 0.38)
     dir = dir / #dir
     local pos = centre + dir * dist
     SetCamCoord(cam, pos.x, pos.y, pos.z)
     PointCamAtCoord(cam, centre.x, centre.y, centre.z)
     SetCamFov(cam, FOV)
+    return centre, pos, size
 end
 
 ---models: list of model names still without a picture.
@@ -84,13 +90,13 @@ function StudioC.Booth(models)
         end
     end)
 
-    local done, failed, total = 0, 0, #models
+    local done, failed, empty, total = 0, 0, 0, #models
     local started = GetGameTimer()
     for i, model in ipairs(models) do
         if stopAsked then break end
         local left = ''
         if done > 3 then
-            local per = (GetGameTimer() - started) / (done + failed)
+            local per = (GetGameTimer() - started) / (done + failed + empty)
             left = (' · about %d min left'):format(math.ceil(per * (total - i) / 60000))
         end
         SendNUIMessage({ action = 'keys', title = ('Photo booth · %d of %d%s'):format(i, total, left),
@@ -99,6 +105,13 @@ function StudioC.Booth(models)
         local ok = IsModelInCdimage(hash) and pcall(lib.requestModel, hash, 8000)
         local obj
         if ok then
+            local dmn, dmx = GetModelDimensions(hash)
+            if #(dmx - dmn) > BIG then   -- far too big for a room: left out of Place, no picture
+                lib.callback.await('dps-studio:thumbEmpty', false, model, 'big')
+                empty = empty + 1
+                SetModelAsNoLongerNeeded(hash)
+                goto continue
+            end
             obj = CreateObjectNoOffset(hash, SPOT.x, SPOT.y, SPOT.z, false, false, false)
             FreezeEntityPosition(obj, true)
             frame(cam, obj, hash)
@@ -106,18 +119,30 @@ function StudioC.Booth(models)
             repeat Wait(0) until HasModelLoaded(hash) or GetGameTimer() > t
             Wait(350)   -- let the textures arrive at full quality
             local data = shoot()
-            local b64 = type(data) == 'string' and data:find('^data:image') and crop(model, data)
-            if b64 then
+            SetEntityVisible(obj, false, false)   -- the same view without the piece, for the cut
+            Wait(150)
+            local bare = shoot()
+            local b64 = type(data) == 'string' and data:find('^data:image') and type(bare) == 'string' and bare:find('^data:image') and crop(model, data, bare)
+            if b64 == 'empty' then   -- nothing but sky and sea in the frame: left out of Place for everyone
+                lib.callback.await('dps-studio:thumbEmpty', false, model)
+                empty = empty + 1
+            elseif b64 then
                 local saved, err = lib.callback.await('dps-studio:thumbSave', false, model, b64)
                 if saved then done = done + 1 else failed = failed + 1; print(('[dps-studio] photo %s: %s'):format(model, tostring(err))) end
             else
                 failed = failed + 1
+                print(('[dps-studio] photo %s: no picture (the shot or the cut did not come back)'):format(model))
             end
             DeleteEntity(obj)
             SetModelAsNoLongerNeeded(hash)
         else
-            failed = failed + 1
+            -- the game would not load this model on its own: it can never be placed, so it is
+            -- left out of Place for everyone instead of being tried again on every run
+            lib.callback.await('dps-studio:thumbEmpty', false, model, 'failed')
+            empty = empty + 1
+            print(('[dps-studio] photo %s: will not load, left out of Place'):format(model))
         end
+        ::continue::
     end
 
     running = false
@@ -136,7 +161,8 @@ function StudioC.Booth(models)
     FreezeEntityPosition(ped, false)
     if not wasGod then SetEntityInvincible(ped, false) end
     StudioC.SetBusy(false)
-    lib.notify({ type = 'success', description = ('Photo booth: %d pictures saved%s%s'):format(done,
+    lib.notify({ type = 'success', description = ('Photo booth: %d pictures saved%s%s%s'):format(done,
+        empty > 0 and (', ' .. empty .. ' empty, too big or not loading (left out of Place)') or '',
         failed > 0 and (', ' .. failed .. ' skipped') or '', stopAsked and '. Stopped, it carries on next time.' or '.') })
 end
 

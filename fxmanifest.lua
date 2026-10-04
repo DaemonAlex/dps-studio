@@ -19,6 +19,7 @@ client_scripts {
     'client/inspect.lua',
     'client/mark.lua',
     'client/booth.lua',
+    'client/flyover.lua',
     'client/ipl.lua',
     'client/doors.lua',
     'client/panel.lua',
@@ -26,9 +27,10 @@ client_scripts {
 server_scripts {
     '@oxmysql/lib/MySQL.lua',
     'server/main.lua',
+    'server/flyover.lua',
 }
 
 ui_page 'html/index.html'
-files { 'html/index.html', 'html/style.css', 'html/app.js', 'html/library.json' }
+files { 'html/index.html', 'html/style.css', 'html/dps-look.css', 'html/app.js', 'html/library.json' }
 
 dependencies { 'ox_lib', 'oxmysql' }
