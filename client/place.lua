@@ -7,7 +7,11 @@ StudioC = StudioC or {}
 
 local K = { click = 24, enter = 191, back = 194, back2 = 177, left = 174, right = 175, up = 172, down = 173,
             wheelUp = 241, wheelDown = 242, e = 38, q = 44, del = 178, x = 73, tab = 37, shift = 21, pgUp = 10, pgDn = 11 }
-local BLOCK = { 24, 25, 140, 141, 142, 14, 15, 16, 17, 37, 21, 10, 11, 44, 38, 178, 73, 191, 194, 177, 172, 173, 174, 175, 241, 242, 200 }
+local BLOCK = { 24, 25, 140, 141, 142, 14, 15, 16, 17, 37, 21, 10, 11, 44, 38, 178, 73, 191, 194, 177, 172, 173, 174, 175, 241, 242, 200,
+                199, 322 }   -- DPS 2026-10-18: 199/322 too, so Esc never opens the pause menu while placing
+
+---Backspace, or Esc (DPS 2026-10-18): one step back.
+local function back() return IsDisabledControlJustPressed(0, 194) or IsDisabledControlJustPressed(0, 177) or IsDisabledControlJustPressed(0, 200) end
 
 local function keys(title, list) SendNUIMessage({ action = 'keys', title = title, keys = list }) end
 local function hideKeys() SendNUIMessage({ action = 'keys' }) end
@@ -56,17 +60,18 @@ function StudioC.Place(roomName, model, id, heading, movingEnt)
     local h, lift = heading or GetEntityHeading(cache.ped), 0.0
     local fine, at = false, nil
     if movingEnt and DoesEntityExist(movingEnt) then fine, at = true, GetEntityCoords(movingEnt) end
+    local startAt, startH = at, h   -- where a moved piece was, for "back to where it was"
 
     local function help()
         if fine then
             keys('Fine tune · ' .. model, {
                 { 'Arrows', 'slide 1 cm' }, { 'Page Up / Down', 'up or down 1 cm' }, { 'Q  E  Wheel', 'turn 1°' },
                 { 'Hold Shift', '10 cm and 15° steps' }, { 'Tab', 'follow my look again' },
-                { 'Left click / Enter', 'save' }, { 'Backspace', 'cancel' } })
+                { 'Left click / Enter', 'save' }, { 'Backspace / Esc', movingEnt and 'back to where it was' or 'back to follow my look' } })
         else
             keys('Placing · ' .. model, {
                 { 'Look', 'move it' }, { 'Wheel  ← →', 'turn' }, { '↑ ↓', 'raise or lower' },
-                { 'Tab', 'fine tune' }, { 'Left click / Enter', 'put it here' }, { 'Backspace', 'cancel' } })
+                { 'Tab', 'fine tune' }, { 'Left click / Enter', 'put it here' }, { 'Backspace / Esc', 'cancel' } })
         end
     end
     help()
@@ -131,9 +136,20 @@ function StudioC.Place(roomName, model, id, heading, movingEnt)
             lib.notify({ type = ok and 'success' or 'error', description = ok and (id and 'Moved' or 'Placed') or err })
             if not ok then showEnt(movingEnt) end
             done = true
-        elseif pressed(K.back) or pressed(K.back2) then
-            showEnt(movingEnt)
-            done = true
+        elseif back() then
+            -- DPS 2026-10-18: one step back per press. Fine tune of a new piece -> follow my look;
+            -- a moved piece -> back where it was, then cancel; following -> cancel.
+            if fine and not movingEnt then
+                fine = false
+                help()
+            elseif fine and movingEnt and (#(at - startAt) > 0.001 or math.abs(h - startH) > 0.01) then
+                at, h = startAt, startH
+                SetEntityCoordsNoOffset(ghost, at.x, at.y, at.z, false, false, false)
+                lib.notify({ type = 'inform', description = 'Back where it was. Backspace again cancels.' })
+            else
+                showEnt(movingEnt)
+                done = true
+            end
         end
         Wait(0)
     end
@@ -190,7 +206,7 @@ function StudioC.Edit(roomName)
             local ok, err = lib.callback.await('dps-studio:pieceRemove', false, roomName, info.id, r and r.data.look)
             lib.notify({ type = ok and 'success' or 'error', description = ok and 'Removed' or err })
             last = nil
-        elseif pressed(K.back) or pressed(K.back2) then
+        elseif back() then
             break
         end
         Wait(0)
