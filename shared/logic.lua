@@ -252,7 +252,7 @@ end
 function Studio.PublicRoom(room)
     local look = Studio.ActiveLook(room)
     return { name = room.name, label = room.label, shell = room.shell, kind = room.kind or 'shell', ipl = room.ipl,
-             entrance = room.entrance, exit = room.exit, look = look and look.id or nil,
+             entrance = room.entrance, exit = room.exit, exits = room.exits, look = look and look.id or nil,
              access = room.access and Studio.CleanAccess(room.access) or { open = true },
              style = look and copyStyle(look.style) or nil, pieces = look and copyPieces(look.pieces) or {} }
 end

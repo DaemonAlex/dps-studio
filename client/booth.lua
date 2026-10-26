@@ -73,7 +73,7 @@ function StudioC.Booth(models)
     SetEntityVisible(ped, false, false)
     SetEntityCollision(ped, false, false)
     SetEntityCoords(ped, SPOT.x, SPOT.y, SPOT.z - 30.0, false, false, false, false)
-    TriggerEvent('qb-weathersync:client:DisableSync')   -- hold the clock for this player only
+    TriggerEvent('qb-weathersync:client:DisableSync', 12)   -- hold the clock for this player only
     NetworkOverrideClockTime(12, 0, 0)                    -- then set midday light for the pictures
     SetRainLevel(0.0)
     DisplayRadar(false)
@@ -150,7 +150,7 @@ function StudioC.Booth(models)
     RenderScriptCams(false, false, 0, true, true)
     DestroyCam(cam, false)
     DisplayRadar(true)
-    TriggerEvent('qb-weathersync:client:EnableSync')
+    TriggerEvent('qb-weathersync:client:EnableSync', 12)
     SetEntityCollision(ped, true, true)
     RequestCollisionAtCoord(back.x, back.y, back.z)
     SetEntityCoords(ped, back.x, back.y, back.z, false, false, false, false)

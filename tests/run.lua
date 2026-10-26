@@ -5,6 +5,8 @@ vec3, vec4, vector3, vector4 = vec3 or vec, vec4 or vec, vector3 or vec, vector4
 dofile('shared/logic.lua')
 dofile('shared/shellmeta.lua')
 dofile('shared/ipls.lua')
+dofile('shared/gameinteriors.lua')
+dofile('shared/crowds.lua')
 
 local fails, n = 0, 0
 local function check(name, ok) n = n + 1; print((ok and 'PASS ' or 'FAIL ') .. name); if not ok then fails = fails + 1 end end
@@ -170,5 +172,25 @@ end
 local iseen, idup = {}, false
 for _, e in ipairs(StudioIpls) do if iseen[e.export] then idup = true end; iseen[e.export] = true end
 check('interior list: filled, no duplicates', #StudioIpls > 50 and not idup)
+-- DPS 2026-10-21: the game's own closed interiors (walk-in / drive-in, one use each)
+local gdup, gbad, walk, drive = false, false, 0, 0
+for _, e in ipairs(StudioGameInteriors) do
+    if iseen[e.key] then gdup = true end
+    iseen[e.key] = true
+    if type(e.name) ~= 'string' or type(e.ipl) ~= 'string' or type(e.label) ~= 'string' or type(e.at) ~= 'table' then gbad = true end
+    if e.mode == 'walk' then walk = walk + 1 elseif e.mode == 'drive' then drive = drive + 1 else gbad = true end
+end
+check('game interiors: filled, no duplicate keys across both lists', #StudioGameInteriors > 50 and not gdup)
+check('game interiors: every row complete, mode walk or drive', not gbad and walk > 0 and drive > 0)
+check('game interiors: Split Sides is offered', StudioInteriorInfo.gi_v_comedy_2 ~= nil and StudioInteriorInfo.gi_v_comedy_2.label == 'Split Sides comedy club')
+check('interior info: open-world bob74 places are hidden', StudioInteriorInfo.GetBahamaMamasObject.hide == true)
+check('interior info: mode lookup', Studio.InteriorMode('GetGunrunningBunkerObject') == 'drive' and Studio.InteriorMode('gi_v_comedy_2') == 'walk' and Studio.InteriorMode('at:1,2,3') == 'walk')
+-- DPS 2026-10-22: club crowds
+local ah = StudioCrowd.DEFAULTS.after_hours
+check('crowds: After Hours starts packed with a dance floor and a DJ', ah.level == 'packed' and #ah.dance >= 40 and ah.staff[1].kind == 'dj')
+check('crowds: dances and patron models listed', #StudioCrowd.DANCES >= 50 and #StudioCrowd.MODELS >= 10)
+check('crowds: levels off < light < packed', StudioCrowd.LEVELS.off == 0 and StudioCrowd.LEVELS.light < StudioCrowd.LEVELS.packed)
+check('crowds: venue names cleaned', StudioCrowd.CleanKey('Split Sides') == 'split_sides' and StudioCrowd.CleanKey('x') == nil and StudioCrowd.CleanKey(5) == nil)
+print(('interiors offered: %d walk-in, %d drive-in game ones + bob74'):format(walk, drive))
 print(('%d checks, %s'):format(n, fails == 0 and 'ALL PASS' or (fails .. ' FAILED')))
 os.exit(fails == 0 and 0 or 1)

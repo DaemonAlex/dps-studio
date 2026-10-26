@@ -131,8 +131,9 @@
       }
       case 'shells': {
         if (S.shellSrc === 'ipls') {
-          return (S.ipls || []).filter((e) => (S.chip.ipls === undefined || S.chip.ipls === 'all' || e.group === S.chip.ipls) && match(`${e.label} ${e.group} ${e.export}`))
-            .map((e) => ({ ipl: true, export: e.export, label: e.label, group: e.group, groups: e.groups, model: e.export }));
+          // DPS 2026-10-21: walk-in and drive-in interiors are two lists (a car drives into a drive-in room)
+          return (S.ipls || []).filter((e) => (e.mode || 'walk') === (S.iplMode || 'walk') && (S.chip.ipls === undefined || S.chip.ipls === 'all' || e.group === S.chip.ipls) && match(`${e.label} ${e.group} ${e.export}`))
+            .map((e) => ({ ipl: true, export: e.export, label: e.label, group: e.group, groups: e.groups, model: e.export, mode: e.mode || 'walk', plain: !!e.plain }));
         }
         if (!S.boot) return [];
         const meta = S.boot.meta || {};
@@ -152,8 +153,11 @@
     return `<span class="meter${pct >= 100 ? ' full' : pct >= 80 ? ' warn' : ''}"><span><i style="width:${pct}%"></i></span>${count} / ${max}</span>`;
   }
 
+  // DPS 2026-10-20: an interior another room already uses (each interior serves one room)
+  const takenBy = (exp) => S.rooms.find((r) => r.kind === 'ipl' && r.ipl === exp && !(S.pick && r.name === S.pick.name));
+
   function rowHtml(tab, it, i) {
-    let thumb = '', nm = '', mt = '', rt = '';
+    let thumb = '', nm = '', mt = '', rt = '', cls = '';
     if (tab === 'rooms') {
       thumb = '<i class="fa-solid fa-door-open"></i>';
       nm = esc(it.label); mt = `<code>${esc(it.name)}</code> · ${esc(it.kind === 'ipl' ? iplLabel(it.ipl) : it.shell)} · look <b>${esc(it.lookName)}</b>`;
@@ -166,11 +170,11 @@
       if (it.hid) rt = `<span class="badge">${it.hid === 'empty' ? 'Empty photo' : it.hid === 'big' ? 'Too big' : it.hid === 'failed' ? 'Will not load' : 'Hidden'}</span>`;
       if (it.piece) thumb = '<i class="fa-solid fa-location-crosshairs"></i>';
     } else if (tab === 'shells' && it.ipl) {
-      thumb = '<i class="fa-solid fa-building"></i>';
-      nm = esc(it.label); mt = `${esc(it.group)} · ${it.groups.length ? it.groups.length + ' style parts' : 'one look'}`;
-      const owner = S.rooms.find((r) => r.kind === 'ipl' && r.ipl === it.export);
+      thumb = `<i class="fa-solid ${it.mode === 'drive' ? 'fa-car' : 'fa-building'}"></i>`;
+      nm = esc(it.label); mt = `${esc(it.group)} · ${it.plain ? 'as the game made it' : it.groups.length ? it.groups.length + ' style parts' : 'one look'}`;
+      const owner = takenBy(it.export);
       if (S.styling && S.styling.export === it.export) rt = '<span class="badge on">Styling</span>';
-      else if (owner) rt = `<span class="badge">Used by ${esc(owner.label)}</span>`;
+      else if (owner) { rt = `<span class="badge">Taken by ${esc(owner.label)}</span>`; if (S.pick) cls = ' taken'; }
     } else if (tab === 'shells') {
       const m = it.meta;
       thumb = `<i class="fa-solid ${m && m.use === 'garage' ? 'fa-warehouse' : m && m.use === 'business' ? 'fa-briefcase' : 'fa-cube'}"></i>`;
@@ -192,7 +196,7 @@
       nm = esc(it.summary); mt = `${esc(it.at)} · ${esc(it.by_name || '')} · <code>${esc(it.room)}</code>`;
       rt = `<span class="badge">${esc(it.action)}</span>`;
     }
-    return `<div class="row" data-i="${i}" role="option"><div class="thumb">${thumb}</div><div class="txt"><div class="nm">${nm}</div><div class="mt">${mt}</div></div><div class="rt">${rt}</div></div>`;
+    return `<div class="row${cls}" data-i="${i}" role="option"><div class="thumb">${thumb}</div><div class="txt"><div class="nm">${nm}</div><div class="mt">${mt}</div></div><div class="rt">${rt}</div></div>`;
   }
 
   function detHtml(tab, it) {
@@ -233,7 +237,11 @@
           return `<span class="lbl">${esc(g.key)}${g.kind === 'many' ? ' · switch each on or off' : ''}</span><div class="chips inl">${none}${chips}</div>`;
         }).join('') || '<p>This interior has no parts to pick.</p>';
       }
-      const how = S.pick ? '<p>Go inside, stand where people should arrive, face into the room and press <kbd>G</kbd>.</p>' : '<p>Go inside to see it. Style changes show straight away while you are in there.</p>';
+      const owner = S.pick && takenBy(it.export);
+      if (owner) return `<div class="det"><p>Taken by <b>${esc(owner.label)}</b>. Each interior serves one room, so pick another one.</p></div>`;
+      const drive = it.mode === 'drive' ? '<p>Drive-in: a car pulled up to the door goes inside with everyone in it. Set the arrival spot where a car fits.</p>' : '';
+      const how = drive + (S.pick ? '<p>Go inside, stand where people should arrive, face into the room and press <kbd>G</kbd>.</p>' : it.plain ? '<p>Go inside to see it. It keeps the look the game gave it.</p>' : '<p>Go inside to see it. Style changes show straight away while you are in there.</p>');
+      if (it.plain) return `<div class="det">${how}<div class="acts"><button class="pri" data-a="iplGo">Go inside <kbd>Enter</kbd></button><button data-a="copyName">Copy name</button></div></div>`;
       const save = S.styling && S.styling.export === it.export ? '<button class="pri" data-a="saveStyle">Save style to the room</button>' : '';
       return `<div class="det">${how}<span class="lbl">Style</span><div class="chips inl">${presets}</div>${parts}
         <div class="acts">${save}<button class="${save ? '' : 'pri'}" data-a="iplGo">Go inside <kbd>Enter</kbd></button><button data-a="copyName">Copy name</button></div></div>`;
@@ -272,11 +280,18 @@
   function renderHead() {
     const t = S.tab;
     banner.hidden = !((S.pick || S.styling) && (t === 'rooms' || t === 'shells'));
-    if (!banner.hidden && S.pick) banner.innerHTML = `<span>Making <b>${esc(S.pick.label)}</b>. Choose where it leads:</span>
-      <button class="btn${S.shellSrc === 'shells' ? ' pri' : ''}" data-a="useShell"><i class="fa-solid fa-cube"></i>&nbsp;Use a shell</button>
-      <button class="btn${S.shellSrc === 'ipls' ? ' pri' : ''}" data-a="useIpl"><i class="fa-solid fa-building"></i>&nbsp;Use a game interior</button>
-      <button class="btn" data-a="usePlace"><i class="fa-solid fa-person-walking"></i>&nbsp;Use a place I go to</button>
-      <button class="btn" data-a="pickCancel">Cancel</button>`;
+    // DPS 2026-10-20 (Damon): one flow for every room. Step 1 = name (the form), 2 = where it leads,
+    // 3 = pick it and stand where people arrive (G), 4 = doors. Back always goes one step back.
+    const stepBar = (n) => `<span class="stepbar">${[1, 2, 3, 4].map((k) => `<i class="${k <= n ? 'on' : ''}"></i>`).join('')}<small>step ${n} of 4</small></span>`;
+    if (!banner.hidden && S.pick && (S.pick.step || 2) === 2) banner.innerHTML = `<div class="flowtop"><span>Making <b>${esc(S.pick.label)}</b>: where does it lead?</span>${stepBar(2)}</div>
+      <div class="leads">
+        <button class="lead" data-a="leadShell"><i class="fa-solid fa-cube"></i><b>A shell</b><small>An empty room under the map that you decorate.</small></button>
+        <button class="lead" data-a="leadIpl"><i class="fa-solid fa-building"></i><b>A game interior</b><small>A real inside from the game, like the After Hours club or the Music Locker.</small></button>
+        <button class="lead" data-a="leadPlace"><i class="fa-solid fa-person-walking"></i><b>Anywhere I walk to</b><small>Any shop, station or map you can stand in.</small></button>
+      </div>
+      <div class="flowbtns"><button class="btn" data-a="pickBack">Back</button></div>`;
+    else if (!banner.hidden && S.pick) banner.innerHTML = `<div class="flowtop"><span>Making <b>${esc(S.pick.label)}</b>: pick the ${S.shellSrc === 'ipls' ? 'interior' : 'shell'}, go inside and press <kbd>G</kbd> where people arrive.</span>${stepBar(3)}</div>
+      <div class="flowbtns"><button class="btn" data-a="pickBack">Back</button></div>`;
     else if (!banner.hidden) banner.innerHTML = `<span>Styling <b>${esc(S.styling.label)}</b>: pick a style, then Save style to the room.</span><button class="btn" data-a="stylingCancel">Cancel</button>`;
     let h = '';
     if (t === 'rooms') h = `<span class="grow">${S.rooms.length} rooms. A room is a door, a shell and saved looks of furniture.</span><button class="btn pri" data-a="newRoom">New room at my spot <kbd>N</kbd></button>`;
@@ -284,7 +299,7 @@
       const r = roomByName(S.here);
       h = (r ? `<span class="grow"><b>${esc(r.label)}</b> · look <b>${esc(r.lookName)}</b></span>${pieceMeter(r.count, r.max)}<button class="btn" data-a="showPieces">Move or remove <kbd>M</kbd></button>` : '<span class="grow">Place</span>') + hiddenButton() + boothButton();
     } else if (t === 'shells') h = S.shellSrc === 'ipls'
-      ? `<span class="grow">${S.ipls ? S.ipls.length : 0} game interiors. Each one serves one room.</span>`
+      ? `<span class="grow">${(S.ipls || []).filter((e) => (e.mode || 'walk') === 'walk').length} walk-in and ${(S.ipls || []).filter((e) => e.mode === 'drive').length} drive-in game interiors, closed ones only. Each serves one room.</span>`
       : `<span class="grow">${S.boot ? S.boot.shells.length : 0} shells from the housing list. The one you pick floats in the sky so open shells show from every side.</span>`;
     else if (t === 'spots') h = `<span class="grow">${S.spots.length} spots, newest first.</span><button class="btn pri" data-a="markSpot">Mark my spot</button>`;
     else if (t === 'doors') h = `<span class="grow">${S.doors.length} doors in the city's lock system.</span><button class="btn pri" data-a="doorNew">New door</button>`;
@@ -302,8 +317,10 @@
     else if (t === 'shells') {
       const srcs = `<button class="chip src${S.shellSrc === 'shells' ? ' on' : ''}" data-ss="shells"><i class="fa-solid fa-cube"></i> Shells</button><button class="chip src${S.shellSrc === 'ipls' ? ' on' : ''}" data-ss="ipls"><i class="fa-solid fa-building"></i> Interiors${S.ipls ? ' · ' + S.ipls.length : ''}</button><span class="brk"></span>`;
       if (S.shellSrc === 'ipls') {
-        const groups = Array.from(new Set((S.ipls || []).map((e) => e.group))).sort();
-        c = srcs + [['all', 'All']].concat(groups.map((g) => [g, g])).map(([k, l]) => `<button class="chip${(S.chip.ipls || 'all') === k ? ' on' : ''}" data-c="${esc(k)}">${esc(l)}</button>`).join('');
+        const mode = S.iplMode || 'walk';
+        const modes = `<button class="chip src${mode === 'walk' ? ' on' : ''}" data-im="walk"><i class="fa-solid fa-person-walking"></i> Walk-in</button><button class="chip src${mode === 'drive' ? ' on' : ''}" data-im="drive"><i class="fa-solid fa-car"></i> Drive-in</button><span class="brk"></span>`;
+        const groups = Array.from(new Set((S.ipls || []).filter((e) => (e.mode || 'walk') === mode).map((e) => e.group))).sort();
+        c = srcs + modes + [['all', 'All']].concat(groups.map((g) => [g, g])).map(([k, l]) => `<button class="chip${(S.chip.ipls || 'all') === k ? ' on' : ''}" data-c="${esc(k)}">${esc(l)}</button>`).join('');
       } else if (S.boot) {
         const uses = Array.from(new Set(Object.values(S.boot.meta || {}).map((m) => m.use))).sort();
         c = srcs + [['all', 'All']].concat(uses.map((u) => [u, u])).map(([k, l]) => `<button class="chip${S.chip.shells === k ? ' on' : ''}" data-c="${esc(k)}">${esc(l)}</button>`).join('');
@@ -583,7 +600,7 @@
         if (!acc) return;
         const r = await post('roomNew', { name: v[0], label: v[1], access: acc });
         if (!result(r)) return;
-        S.pick = { name: v[0], label: v[1] }; setTab('shells'); return;
+        S.pick = { name: v[0], label: v[1], step: 2 }; setTab('rooms'); return;
       }
       case 'decorate': if (!it) return; S.here = it.name; post('decorate', { name: it.name }).then((r) => { if (result(r)) setTab('place'); }); return;
       case 'decorateRoom': { const n = el.dataset.n; S.here = n; post('decorate', { name: n }).then((r) => { if (result(r)) setTab('place'); }); return; }
@@ -614,7 +631,7 @@
         if (!await confirmBox('Change shell or way out', 'Pick a shell and mark the way out again. With the same shell every look stays. A different shell starts with one empty look, and the old room stays in History.', 'Go on')) return;
         const r = await post('roomNew', { name: it.name, label: it.label, keepDoor: true });
         if (!result(r)) return;
-        S.pick = { name: it.name, label: it.label }; setTab('shells'); return;
+        S.pick = { name: it.name, label: it.label, step: 2 }; setTab('rooms'); return;
       }
       case 'copy': {
         const v = await ask('Copy room to my spot', 'A new door where you stand, with the same shell and every look.', [
@@ -670,10 +687,21 @@
         if (!it || !it.name) return;
         post('roomAccess', { name: it.name, access: accessOut('room:' + it.name) }).then((r) => { if (result(r, 'Saved')) { delete S.acc['room:' + it.name]; load(); } }); return;
       }
-      case 'useShell': S.shellSrc = 'shells'; setTab('shells'); return;
-      case 'useIpl': S.shellSrc = 'ipls'; post('previewStop'); S.pv = null; setTab('shells'); return;
-      case 'usePlace': post('placeWalk').then((r) => result(r)); return;
-      case 'iplGo': if (it && it.ipl) post('iplVisit', { export: it.export, style: styleOf(it.export) }); return;
+      case 'useShell': case 'leadShell': if (S.pick) S.pick.step = 3; S.shellSrc = 'shells'; setTab('shells'); return;
+      case 'useIpl': case 'leadIpl': if (S.pick) S.pick.step = 3; S.shellSrc = 'ipls'; post('previewStop'); S.pv = null; setTab('shells'); return;
+      case 'usePlace': case 'leadPlace': if (S.pick) S.pick.step = 3; post('placeWalk').then((r) => { if (!result(r) && S.pick) { S.pick.step = 2; render(true); } }); return;
+      case 'pickBack': {   // one step back, never out of the whole room without asking
+        if (!S.pick) return;
+        if ((S.pick.step || 2) >= 3) { S.pick.step = 2; post('previewStop'); S.pv = null; setTab('rooms'); return; }
+        if (!await confirmBox('Stop making this room?', `${S.pick.label} is not saved yet. Stop and forget it?`, 'Stop')) return;
+        return act('pickCancel');
+      }
+      case 'iplGo': {
+        if (!it || !it.ipl) return;
+        const owner = S.pick && takenBy(it.export);
+        if (owner) return result({ ok: false, err: `Taken by ${owner.label}. Pick another interior.` });
+        post('iplVisit', { export: it.export, style: styleOf(it.export) }); return;
+      }
       case 'iplPreset': {
         if (!it || !it.ipl) return;
         const st = styleOf(it.export); st.preset = el.dataset.v;
@@ -747,6 +775,7 @@
     const tbtn = e.target.closest('.mode'); if (tbtn) { setTab(tbtn.dataset.t); return; }
     const c = e.target.closest('.chip'); if (c && chips.contains(c)) {
       if (c.dataset.s) { setSrc(c.dataset.s); return; }
+      if (c.dataset.im) { S.iplMode = c.dataset.im; S.chip.ipls = 'all'; render(false); return; }
       if (c.dataset.ss) { S.shellSrc = c.dataset.ss; if (S.shellSrc === 'ipls') post('previewStop'); S.pv = null; render(false); return; }
       if (S.tab === 'shells' && S.shellSrc === 'ipls') { S.chip.ipls = c.dataset.c; render(false); return; }
       S.chip[S.tab === 'place' && S.src !== 'housing' ? 'lib' : S.tab] = c.dataset.c; render(false); return;
@@ -760,7 +789,9 @@
   list.addEventListener('dblclick', (e) => { const r = e.target.closest('.row'); if (r && !e.target.closest('.det')) primary(); });
   list.addEventListener('error', (e) => { if (e.target.tagName === 'IMG') e.target.parentNode.innerHTML = '<i class="fa-solid fa-couch"></i>'; }, true);
   function closeModal() { if (!modal.hidden) { const n = modal.querySelector('#fno'); if (n) n.click(); else { modal.hidden = true; modal.innerHTML = ''; } } }
-  $('#close').addEventListener('click', () => { closeModal(); post('close'); });
+  // DPS 2026-10-18: leaving the menu drops a half-made room or style, so it opens fresh next time
+  function leave() { closeModal(); if (S.pick) post('pickCancel'); clearTimeout(S.shellTimer); S.pv = null; S.pick = null; S.styling = null; S.open = false; post('close'); }
+  $('#close').addEventListener('click', leave);
   $('#fleet').addEventListener('click', () => post('fleet'));
   let qt = null; q.addEventListener('input', () => { clearTimeout(qt); qt = setTimeout(() => { qt = null; render(false); }, 90); });
   q.addEventListener('focus', () => bar.classList.add('focus'));
@@ -779,13 +810,22 @@
 
   document.addEventListener('keydown', (e) => {
     if (app.hidden) return;
+    // DPS 2026-10-20: the key that brought the panel back from the game must not act here too
+    if (Date.now() < (S.calmUntil || 0) && (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'Enter')) { e.preventDefault(); return; }
     if (!modal.hidden) { if (e.key === 'Escape') { e.preventDefault(); modal.querySelector('#fno') && modal.querySelector('#fno').click(); } return; }
     const ae = document.activeElement;
     const inBox = ae && ae !== q && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName);
     if (inBox) { if (e.key === 'Escape') { e.preventDefault(); ae.blur(); } return; }   // typing in a form box stays in the box
     const typing = ae === q;
     const onButton = document.activeElement && document.activeElement.tagName === 'BUTTON';
-    if (e.key === 'Escape') { e.preventDefault(); if (typing && q.value) { q.value = ''; render(false); } else post('close'); return; }
+    if (e.key === 'Escape') {   // DPS 2026-10-18: one step back per press, like any menu
+      e.preventDefault();
+      if (typing && q.value) { q.value = ''; render(false); return; }
+      if (S.pick) return act('pickBack');
+      if (S.styling) return act('stylingCancel');
+      if (S.open) { S.open = false; render(true); list.focus(); return; }
+      return leave();
+    }
     if (onButton && (e.key === 'Enter' || e.key === ' ')) return;   // a focused button presses itself
     if (e.key === 'ArrowDown') { e.preventDefault(); select(S.sel + 1, S.tab === 'shells' ? undefined : S.open); if (typing) list.focus(); return; }
     if (e.key === 'ArrowUp') { e.preventDefault(); select(S.sel - 1, S.tab === 'shells' ? undefined : S.open); if (typing) list.focus(); return; }
@@ -877,11 +917,20 @@
     switch (m.action) {
       case 'open':
         S.shown = true; app.hidden = false;
+        S.calmUntil = Date.now() + 450;
         S.here = m.here || null;
-        if (m.pick !== undefined) S.pick = m.pick || null;
+        if (m.pick !== undefined) {
+          // keep the step the panel was on; the game says which step when it knows better
+          const same = S.pick && m.pick && S.pick.name === m.pick.name;
+          S.pick = m.pick ? { name: m.pick.name, label: m.pick.label, step: m.pick.step || (same ? S.pick.step : 2) || 2 } : null;
+        }
         S.pv = m.previewing || null;
         loadThumbs();
-        if (!S.ipls) post('ipls').then((r) => { S.ipls = Array.isArray(r) ? r : []; if (S.shown && (S.tab === 'shells' || S.tab === 'rooms')) render(true); });
+        if (!S.ipls) post('ipls').then((r) => {
+          S.ipls = Array.isArray(r) ? r : (r && Array.isArray(r.list) ? r.list : []);
+          S.iplTotal = r && typeof r.total === 'number' ? r.total : S.ipls.length;
+          if (S.shown && (S.tab === 'shells' || S.tab === 'rooms')) render(true);
+        });
         S.src = store('dps-studio-src', 'decorate'); if (!['decorate', 'build', 'housing'].includes(S.src)) S.src = 'decorate';
         if (!S.lib) fetch('library.json').then((r) => r.json()).then((d) => {
           if (!d || !Array.isArray(d.groups)) throw new Error('bad');

@@ -45,43 +45,6 @@ Everything below is admin only (ACE `dps.entityselector`) unless it says "all pl
 **Map flyover**
 - `/mapflyover` flies a top-down camera over every map pack listed in `flyover/targets.json` that has no picture yet. Pictures (1600 x 900 webp) are saved as text files in `flyover/shots/<pack>.txt`. Backspace stops. The next run continues.
 
-## Screenshots
-
-**Rooms and Place.** The Rooms tab lists each room with its shell and furniture count (400 per look). The Place tab asks which room to decorate, then shows the prop library by category, every piece with its photo.
-
-<p>
-<img src="docs/screenshots/01-rooms.jpg" alt="Rooms tab" width="270">
-<img src="docs/screenshots/03-place-start.jpg" alt="Place tab, choosing a room" width="270">
-<img src="docs/screenshots/02-place-library.jpg" alt="Place tab, Electronics category with photos" width="270">
-</p>
-
-**Placing furniture.** The piece follows your look; Tab switches to fine tune (1 cm and 1 degree, Shift for 10 cm and 15 degrees). The bar along the bottom lists the keys.
-
-![Placing a filing cabinet in an office](docs/screenshots/04-placing.jpg)
-![Fine tune mode with the key bar](docs/screenshots/05-fine-tune.jpg)
-![Placing an arcade cabinet beside the airport departures board](docs/screenshots/06-placing-arcade.jpg)
-
-**Shells.** Pick a shell and it floats in the sky so open shells show from every side. Turn it, zoom, and walk inside before you use it.
-
-![Previewing a luxury apartment shell in the sky](docs/screenshots/07-shells.jpg)
-
-**Inspect, Spots, Doors and History.** The Inspect card for the object you aim at; saved spots with street, area and author; the city's ox_doorlock doors with who may open each; and every change, ready to put back.
-
-<p>
-<img src="docs/screenshots/09-spots.jpg" alt="Spots tab" width="270">
-<img src="docs/screenshots/10-doors.jpg" alt="Doors tab" width="270">
-<img src="docs/screenshots/11-history.jpg" alt="History tab" width="270">
-</p>
-
-<img src="docs/screenshots/08-inspect.jpg" alt="Inspect card" width="346">
-
-**Photo booth.** Each library piece is photographed alone in the sky for the Place list. Backspace stops; the next run carries on.
-
-<p>
-<img src="docs/screenshots/12-photo-booth-bench.jpg" alt="Photo booth: a gym bench" width="410">
-<img src="docs/screenshots/13-photo-booth-art.jpg" alt="Photo booth: wall art, piece 429 of 1225" width="410">
-</p>
-
 ## Prerequisites
 
 Required (set in `fxmanifest.lua`):

@@ -10,7 +10,8 @@ local rooms = {}           -- name -> room (see Studio.NewRoom)
 local ready = false
 local shells, shellSet = {}, {}
 local iplSet = {}
-for _, e in ipairs(StudioIpls or {}) do iplSet[e.export] = true end
+-- DPS 2026-10-21: every closed interior Studio offers (bob74 + the game's own); open-world ones are hidden
+for key, info in pairs(StudioInteriorInfo or {}) do if not info.hide then iplSet[key] = true end end
 local furnCats, furnModels
 
 local function allowed(src) return src and IsPlayerAceAllowed(src, ACE) end
@@ -306,7 +307,7 @@ lib.callback.register('dps-studio:roomCreate', function(src, d)
         local owner = iplOwner(d.ipl, name)
         if owner then return false, ('That interior already belongs to %s. Each interior serves one room.'):format(owner.label) end
         local iplLabel = Studio.IsPlaceKey(d.ipl) and 'a place in the world' or d.ipl
-        for _, e in ipairs(StudioIpls) do if e.export == d.ipl then iplLabel = e.label end end
+        if StudioInteriorInfo[d.ipl] then iplLabel = StudioInteriorInfo[d.ipl].label end
         return change(src, name, rooms[name] and 'rebuild' or 'create', ('Made room %s in %s'):format(label, iplLabel), function()
             local old = rooms[name]
             local room = Studio.NewIplRoom(name, label, d.ipl, d.entrance, d.exit, d.style)
@@ -888,3 +889,23 @@ lib.callback.register('dps-studio:roomAccess', function(src, name, access)
     for _, id in ipairs(room.doors or {}) do saveDoor(src, id, { access = a }, 'Access for') end
     return true
 end)
+
+-- ---------------------------------------------------------------- drive-in rooms
+-- DPS 2026-10-21 (Damon): a car driven through a drive-in room's door takes everyone in it along.
+-- The driver's game moves the car; this tells the passengers' games they are inside (or out).
+RegisterNetEvent('dps-studio:carried', function(name, on, ids)
+    local src = source
+    local room = type(name) == 'string' and rooms[name]
+    if not room or room.kind ~= 'ipl' or Studio.InteriorMode(room.ipl) ~= 'drive' or type(ids) ~= 'table' then return end
+    local me = GetPlayerPed(src)
+    local car = me ~= 0 and GetVehiclePedIsIn(me, false) or 0
+    if car == 0 or GetPedInVehicleSeat(car, -1) ~= me then return end
+    for i = 1, math.min(#ids, 16) do
+        local id = tonumber(ids[i])
+        local ped = id and GetPlayerPed(id) or 0
+        if ped ~= 0 and id ~= src and GetVehiclePedIsIn(ped, false) == car then
+            TriggerClientEvent('dps-studio:carried', id, name, on == true)
+        end
+    end
+end)
+

@@ -29,7 +29,7 @@ local function show(t)
     open = true
     tab = t or tab
     focus(true)
-    nui({ action = 'open', tab = tab, here = StudioC.RoomHere(), pick = pick and { name = pick.name, label = pick.label } or false,
+    nui({ action = 'open', tab = tab, here = StudioC.RoomHere(), pick = pick and { name = pick.name, label = pick.label, step = pick.step } or false,
           previewing = pv.on and pv.model or false })
 end
 
@@ -38,6 +38,17 @@ local function hide()
     open = false
     focus(false)
     nui({ action = 'hide' })
+end
+
+-- DPS 2026-10-20 (Damon): one room flow, so the same key guide for shells, game interiors and
+-- walk-to places. G = people arrive here, Enter = back to the panel, Backspace = one step back.
+local function flowKeys(title, extra, step)
+    local list = {}
+    if pick and step ~= 4 then list[#list + 1] = { 'G', 'people arrive here' } end
+    for _, k in ipairs(extra or {}) do list[#list + 1] = k end
+    if step ~= 4 then list[#list + 1] = { 'Enter', 'back to the panel' } end
+    list[#list + 1] = { 'Backspace', step == 4 and 'done with doors' or (pick and 'back one step' or 'back to the panel') }
+    nui({ action = 'keys', title = pick and (('%s · step %d of 4'):format(pick.label, step or 3)) or title, keys = list })
 end
 
 -- ---------------------------------------------------------------- shell preview
@@ -127,10 +138,8 @@ local function iplWalk()
     iplWalking = true
     hide()
     StudioC.SetBusy(true)
-    local list = { { 'Walk', 'look around' }, { 'Enter', 'back to the panel, try styles' } }
-    if pick then list[#list + 1] = { 'G', 'the way out of ' .. pick.label .. ' is here' } end
-    list[#list + 1] = { 'Backspace', 'leave the interior' }
-    nui({ action = 'keys', title = 'Interior', keys = list })
+    if pick then pick.step = 3 end
+    flowKeys('Interior', { { 'Walk', 'look around, Enter to try styles' } })
     CreateThread(function()
         local calm = GetGameTimer() + 300
         while iplWalking do
@@ -156,11 +165,22 @@ local function iplWalk()
                 if ok then
                     iplWalking = false
                     nui({ action = 'keys' })
-                    local e = pick.entrance
+                    local made = pick
+                    local e = made.entrance
                     pick = nil
+                    -- step 4: any doors inside the interior, same as walk-to places (Backspace when done)
+                    local n = 0
+                    while true do
+                        local shape = StudioC.PickDoor(('%s · step 4 of 4: pick a door, Backspace when done'):format(made.label))
+                        if not shape then break end
+                        n = n + 1
+                        local okD, errD = StudioC.CreateDoor(shape, ('%s door %d'):format(made.label, n), made.access,
+                            { locked = not (made.access and made.access.open) }, made.name)
+                        if not okD then notify(false, errD or 'Door not saved') end
+                    end
                     StudioC.IplLeave(vec4(e.x, e.y, e.z, e.h))
                     StudioC.SetBusy(false)
-                    notify(true, ('%s is ready. Press E at the door to try it.'):format(d.label))
+                    notify(true, ('%s is ready%s. Press E at the door to try it.'):format(d.label, n > 0 and (' with %d door%s'):format(n, n == 1 and '' or 's') or ''))
                 else
                     notify(false, err or 'Not saved')
                 end
@@ -211,15 +231,44 @@ local function floorPoint()
     return vec3(c.x, c.y, pv.minZ + 1.0)
 end
 
+-- DPS 2026-10-18: the middle of the shell's box can be outside its rooms (L-shapes, porches).
+-- Walk-in spots are floor points with a ceiling 2-7 m above them, nearest the middle first.
+local function rayDown(x, y, z1, z2)
+    local _, hit, pos = GetShapeTestResult(StartExpensiveSynchronousShapeTestLosProbe(x, y, z1, x, y, z2, 1 | 16, cache.ped, 7))
+    return hit == 1 and pos or nil
+end
+local function insideSpots()
+    local out = {}
+    if not pv.hash then return out end
+    local mn, mx = GetModelDimensions(pv.hash)
+    local step = math.max(1.5, math.max(mx.x - mn.x, mx.y - mn.y) / 24)
+    local top, bottom = BASE.z + mx.z + 1.0, BASE.z + mn.z - 1.0
+    for x = mn.x + 0.75, mx.x - 0.75, step do
+        for y = mn.y + 0.75, mx.y - 0.75, step do
+            local wx, wy = BASE.x + x, BASE.y + y
+            local roof = rayDown(wx, wy, top, bottom)
+            local floor = roof and rayDown(wx, wy, roof.z - 0.3, bottom)
+            if floor and roof.z - floor.z >= 2.0 and roof.z - floor.z <= 7.0 then
+                out[#out + 1] = vec3(wx, wy, floor.z + 1.0)
+            end
+        end
+    end
+    local c = pv.center
+    table.sort(out, function(a, b) return #(a.xy - c.xy) < #(b.xy - c.xy) end)
+    return out
+end
+
 local walkKeys
 local function walk()
     if not pv.obj then return notify(false, 'Pick a shell that loads first') end
     hide()
+    if pick then pick.step = 3 end
     pv.walking = true
     StudioC.SetBusy(true)
     local ped = cache.ped
     RenderScriptCams(false, false, 0, true, true)
-    local p = floorPoint()
+    pv.spots, pv.spotN = insideSpots(), 1
+    local p = pv.spots[1] or floorPoint()
     SetEntityCollision(ped, true, true)
     SetEntityCoords(ped, p.x, p.y, p.z, false, false, false, false)
     SetEntityVisible(ped, true, false)
@@ -231,8 +280,19 @@ local function walk()
         while pv.walking do
             DisableControlAction(0, 191, true); DisableControlAction(0, 194, true); DisableControlAction(0, 177, true); DisableControlAction(0, 47, true)
             DisableControlAction(0, 199, true); DisableControlAction(0, 200, true)   -- Esc leaves too, never the pause menu
+            DisableControlAction(0, 74, true)   -- H: next inside spot
             if GetGameTimer() < calm then
                 -- wait out the key press that started walking
+            elseif IsDisabledControlJustPressed(0, 74) then          -- H: try the next spot inside the shell
+                local n = #(pv.spots or {})
+                if n == 0 then
+                    notify(false, 'No other spot found inside this shell')
+                else
+                    pv.spotN = pv.spotN % n + 1
+                    local s = pv.spots[pv.spotN]
+                    SetEntityCoords(cache.ped, s.x, s.y, s.z, false, false, false, false)
+                    notify(true, ('Spot %d of %d'):format(pv.spotN, n))
+                end
             elseif IsDisabledControlJustPressed(0, 191) then          -- Enter: back to the panel view
                 pv.walking = false
                 hidePed()
@@ -257,17 +317,22 @@ local function walk()
                 else
                     notify(false, err or 'Not saved')
                 end
-            elseif IsDisabledControlJustPressed(0, 194) or IsDisabledControlJustPressed(0, 177) or IsDisabledControlJustPressed(0, 200) then -- Backspace / Esc: leave
+            elseif IsDisabledControlJustPressed(0, 194) or IsDisabledControlJustPressed(0, 177) or IsDisabledControlJustPressed(0, 200) then
+                -- Backspace / Esc: one step back = back to the panel with the shell still showing
+                -- (DPS 2026-10-20: it used to end the preview and drop a half-made room on Rooms)
                 pv.walking = false
+                hidePed()
+                RenderScriptCams(true, false, 0, true, true)
+                placeCam()
+                nui({ action = 'keys' })
                 StudioC.SetBusy(false)
-                previewStop()
-                show('rooms')
+                show('shells')
             else
                 local now = GetGameTimer()
                 if now > nextFall then
                     nextFall = now + 500
                     if GetEntityCoords(cache.ped).z < pv.minZ - 20.0 then
-                        local f = floorPoint()
+                        local f = (pv.spots and pv.spots[pv.spotN or 1]) or floorPoint()
                         SetEntityCoords(cache.ped, f.x, f.y, f.z, false, false, false, false)
                     end
                 end
@@ -278,10 +343,7 @@ local function walk()
 end
 
 walkKeys = function()
-    local list = { { 'Walk', 'look around inside' }, { 'Enter', 'back to the panel' } }
-    if pick then list[#list + 1] = { 'G', 'the way out of ' .. pick.label .. ' is here' } end
-    list[#list + 1] = { 'Backspace', 'leave the preview' }
-    nui({ action = 'keys', title = pv.model or 'Shell', keys = list })
+    flowKeys(pv.model or 'Shell', { { 'Walk', 'look around inside' }, { 'H', 'next spot, if you landed outside' } })
 end
 
 -- ---------------------------------------------------------------- /admin
@@ -299,7 +361,10 @@ RegisterCommand('admin', function()
     end
     print(('[dps-studio] /admin %s'):format(open and 'closing' or 'opening'))
     if open then
+        -- DPS 2026-10-18: closing with /admin ends a preview too, so the next /admin opens fresh where you stand
+        if pv.on then previewStop() end
         if StudioC.IplVisiting() then CreateThread(function() StudioC.IplLeave() end) end
+        pick, tab = nil, 'rooms'
         hide()
     else
         show()
@@ -349,7 +414,7 @@ end)
 RegisterNUICallback('close', function(_, cb)
     if pv.on then previewStop() end
     if StudioC.IplVisiting() then CreateThread(function() StudioC.IplLeave() end) end
-    pick = nil
+    pick, tab = nil, 'rooms'   -- DPS 2026-10-18: reopen on Rooms, no old preview
     hide()
     cb({ ok = true })
 end)
@@ -456,7 +521,8 @@ local function unlight()
 end
 StudioC.Unlight = unlight
 
-RegisterNUICallback('ipls', function(_, cb) cb(StudioC.IplCatalogue()) end)
+-- DPS 2026-10-20: the total too, so the panel can say how many are not in our game version
+RegisterNUICallback('ipls', function(_, cb) cb({ list = StudioC.IplCatalogue(), total = #(StudioIpls or {}) }) end)
 
 -- ---------------------------------------------------------------- NUI: doors
 RegisterNUICallback('doorPickers', function(_, cb) cb(lib.callback.await('dps-studio:doorPickers', false) or {}) end)
@@ -506,12 +572,14 @@ RegisterNUICallback('placeWalk', function(_, cb)
     cb({ ok = true })
     hide()
     placeWalking = true
-    nui({ action = 'keys', title = 'Go to the place for ' .. pick.label, keys = {
-        { 'Walk, drive or /tp', 'get there' }, { 'G', 'the way out is here' }, { 'Backspace', 'stop' } } })
+    pick.step = 3
+    flowKeys('Go to the place', { { 'Walk, drive or /tp', 'get there first' } })
     CreateThread(function()
         local calm = GetGameTimer() + 300
         while placeWalking do
             DisableControlAction(0, 47, true); DisableControlAction(0, 194, true); DisableControlAction(0, 177, true)
+            DisableControlAction(0, 199, true); DisableControlAction(0, 200, true)   -- DPS 2026-10-18: Esc goes back to the panel, never the pause menu
+            DisableControlAction(0, 191, true)   -- DPS 2026-10-20: Enter = back to the panel, like every other step
             if GetGameTimer() < calm then
                 -- wait out the click that started this
             elseif IsDisabledControlJustPressed(0, 47) and pick and not cache.vehicle then
@@ -529,7 +597,7 @@ RegisterNUICallback('placeWalk', function(_, cb)
                     -- the doors of the place: each one goes into ox_doorlock with the same access
                     local n = 0
                     while true do
-                        local shape = StudioC.PickDoor(('Doors of %s: pick one, Backspace when done'):format(made.label))
+                        local shape = StudioC.PickDoor(('%s · step 4 of 4: pick a door, Backspace when done'):format(made.label))
                         if not shape then break end
                         n = n + 1
                         local okD, errD = StudioC.CreateDoor(shape, ('%s door %d'):format(made.label, n), made.access,
@@ -540,9 +608,12 @@ RegisterNUICallback('placeWalk', function(_, cb)
                 else
                     notify(false, err or 'Not saved')
                 end
-            elseif IsDisabledControlJustPressed(0, 194) or IsDisabledControlJustPressed(0, 177) then
+            elseif IsDisabledControlJustPressed(0, 194) or IsDisabledControlJustPressed(0, 177) or IsDisabledControlJustPressed(0, 200)
+                or IsDisabledControlJustPressed(0, 191) then
+                -- Backspace / Esc / Enter: back to the panel at step 2 (where does it lead?)
                 placeWalking = false
                 nui({ action = 'keys' })
+                if pick then pick.step = 2 end
                 show('rooms')
             end
             Wait(0)

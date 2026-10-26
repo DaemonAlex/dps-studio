@@ -32,9 +32,11 @@ local function setsOf(v, out, depth)
     return out
 end
 
-local function isVariant(v) return type(v) == 'table' and type(v.ipl) == 'string' and type(v.interiorId) == 'number' end
+-- DPS 2026-10-18: bob74 hands over functions as funcref tables; reading a field from one errors
+-- ("Cannot index a funcref", the interior list failed to load), so skip callables first.
+local function isVariant(v) return type(v) == 'table' and not callable(v) and type(v.ipl) == 'string' and type(v.interiorId) == 'number' end
 
-local function isArray(t) return type(t) == 'table' and #t > 0 and next(t, #t) == nil end
+local function isArray(t) return type(t) == 'table' and not callable(t) and #t > 0 and next(t, #t) == nil end
 
 ---Options of a pick-one or switch-on group. A string or a list is one option (a bundle of
 ---sets); a map of alternatives (Numbering.Level1 = { style1 = ..., style2 = ... }) becomes one
@@ -118,8 +120,11 @@ function StudioC.IplCatalogue()
     catalogue = {}
     for _, e in ipairs(StudioIpls or {}) do
         local ok, obj = pcall(function() return exports[BOB][e.export]() end)
-        if ok and type(obj) == 'table' then
-            local info = { entry = e, obj = obj, groups = readGroups(obj) }
+        local okG, read = false, nil
+        if ok and type(obj) == 'table' then okG, read = pcall(readGroups, obj) end   -- one bad interior never empties the list
+        if not okG and ok and type(obj) == 'table' then print(('[dps-studio] interior %s skipped: %s'):format(tostring(e.export), tostring(read))) end
+        if okG then
+            local info = { entry = e, obj = obj, groups = read }
             local theme
             for _, g in ipairs(info.groups) do if g.kind == 'theme' then theme = g.options[1] end end
             info.at = e.at
@@ -136,12 +141,80 @@ function StudioC.IplCatalogue()
                     for j, o in ipairs(g.options) do opts[j] = o.key end
                     groups[i] = { key = g.key, kind = g.kind, options = opts }
                 end
-                catalogue[#catalogue + 1] = { export = e.export, group = e.group, label = e.label, groups = groups }
+                if not e.hide then   -- DPS 2026-10-21: open-world places are never offered for a room
+                    catalogue[#catalogue + 1] = { export = e.export, group = e.group, label = e.label, groups = groups, mode = e.mode or 'walk', crowd = e.crowd or false }
+                end
+            end
+        end
+    end
+    -- DPS 2026-10-21 (Damon): the game's own closed interiors (no style parts), newer ones only when
+    -- our game build has them. If the map file is on but the interior is not where the game puts it,
+    -- one of our maps replaced it: leave it out so a room never fights a map.
+    local build = GetGameBuildNumber()
+    for _, e in ipairs(StudioGameInteriors or {}) do
+        if (e.build or 0) <= build then
+            local id = GetInteriorAtCoordsWithType(e.at.x, e.at.y, e.at.z, e.name)
+            if id ~= 0 or not IsIplActive(e.ipl) then
+                byExport[e.key] = { entry = e, groups = {}, at = e.at, plain = true }
+                catalogue[#catalogue + 1] = { export = e.key, group = e.group, label = e.label, groups = {}, mode = e.mode, crowd = e.crowd or false, plain = true }
             end
         end
     end
     table.sort(catalogue, function(a, b) return a.group == b.group and a.label < b.label or a.group < b.group end)
     return catalogue
+end
+
+-- ---------------------------------------------------------------- the game's own interiors
+local turnedOn = {}   -- map files this player switched on for a plain interior (switched off again on leave)
+
+local function plainLoad(info)
+    local e = info.entry
+    if not IsIplActive(e.ipl) then RequestIpl(e.ipl); turnedOn[e.ipl] = true end
+    local id, t = 0, GetGameTimer() + 3000
+    repeat
+        id = GetInteriorAtCoordsWithType(e.at.x, e.at.y, e.at.z, e.name)
+        if id == 0 then Wait(50) end
+    until id ~= 0 or GetGameTimer() > t
+    if id ~= 0 then
+        PinInteriorInMemory(id)
+        t = GetGameTimer() + 3000
+        while not IsInteriorReady(id) and GetGameTimer() < t do Wait(50) end
+        RefreshInterior(id)
+    end
+    return id
+end
+
+---A spot to stand in a plain interior: the middle of its biggest room, a metre above that
+---room's floor (the game's interior origin is often in a wall or under the floor).
+local function plainSpot(info)
+    local id = plainLoad(info)
+    if id == 0 then return info.at end
+    local best, vol = nil, 0
+    for r = 1, GetInteriorRoomCount(id) - 1 do   -- room 0 is the outside ("limbo")
+        local ax, ay, az, bx, by, bz = GetInteriorRoomExtents(id, r)   -- the room's box, in the interior's own space
+        local v = (bx - ax) * (by - ay) * (bz - az)
+        if v > vol then best, vol = { vec3(ax, ay, az), vec3(bx, by, bz) }, v end
+    end
+    if not best then return info.at end
+    local mn, mx = best[1], best[2]
+    local lx, ly, lz = (mn.x + mx.x) / 2, (mn.y + mx.y) / 2, mn.z + 1.0
+    local px, py, pz = GetInteriorPosition(id)
+    if type(px) == 'vector3' then px, py, pz = px.x, px.y, px.z end
+    local qx, qy, qz, qw = GetInteriorRotation(id)
+    -- rotate the local point by the interior's rotation (quaternion), then move it to the interior.
+    -- Map files store some rotations the other way round, so the mirrored one is tried too; the
+    -- spot that really lies inside this interior wins.
+    local function place(x, y, z, w)
+        local ix, iy, iz = w * lx + y * lz - z * ly, w * ly + z * lx - x * lz, w * lz + x * ly - y * lx
+        local iw = -x * lx - y * ly - z * lz
+        return vec3(px + ix * w + iw * -x + iy * -z - iz * -y,
+                    py + iy * w + iw * -y + iz * -x - ix * -z,
+                    pz + iz * w + iw * -z + ix * -y - iy * -x)
+    end
+    for _, s in ipairs({ place(qx, qy, qz, qw), place(-qx, -qy, -qz, qw) }) do
+        if GetInteriorAtCoords(s.x, s.y, s.z) == id then return s end
+    end
+    return place(qx, qy, qz, qw)
 end
 
 function StudioC.IplAt(export)
@@ -165,6 +238,7 @@ function StudioC.IplApply(export, style)
     StudioC.IplCatalogue()
     local info = byExport[export]
     if not info then return false end
+    if info.plain then return plainLoad(info) ~= 0 end   -- the game's own look, nothing to style
     style = type(style) == 'table' and style or { preset = 'default' }
     local preset = style.preset or 'default'
     if info.obj.LoadDefault then pcall(info.obj.LoadDefault) end
@@ -229,6 +303,13 @@ end
 ---Puts an interior back the way bob74 loads it.
 function StudioC.IplReset(export)
     local info = byExport[export]
+    if info and info.plain then
+        local e = info.entry
+        local id = GetInteriorAtCoordsWithType(e.at.x, e.at.y, e.at.z, e.name)
+        if id ~= 0 then UnpinInterior(id) end
+        if turnedOn[e.ipl] then RemoveIpl(e.ipl); turnedOn[e.ipl] = nil end
+        return
+    end
     if info and info.obj.LoadDefault then pcall(info.obj.LoadDefault) end
     local id = info and interiorOf(info)
     if id and id > 0 then RefreshInterior(id) end
@@ -256,6 +337,7 @@ function StudioC.IplVisit(export, style)
     DoScreenFadeOut(250)
     Wait(300)
     StudioC.IplApply(export, style)
+    if byExport[export] and byExport[export].plain then at = plainSpot(byExport[export]) end
     FreezeEntityPosition(ped, true)
     RequestCollisionAtCoord(at.x, at.y, at.z)
     SetEntityCoords(ped, at.x, at.y, at.z, false, false, false, false)

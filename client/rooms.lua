@@ -16,11 +16,46 @@ local spawning = {}           -- name -> true while its models load
 local prompt                  -- the key of the prompt showing
 local inside = {}             -- name -> true while this player is inside that room
 
+-- DPS 2026-10-18: /roomlight <timecycle> <0-1> tries an indoor light inside a room, for this
+-- admin only (a shell is lit like outdoors). Leaving the room puts normal light back.
+local roomLight
+RegisterCommand('roomlight', function(_, args)
+    if not StudioC.isAdmin then
+        StudioC.isAdmin = lib.callback.await('dps-studio:isAdmin', false) and true or false
+        if not StudioC.isAdmin then return lib.notify({ type = 'error', description = 'Admins only' }) end
+    end
+    local name = args[1]
+    if name == 'info' then   -- what this game is drawing right now, written to the client log
+        local ped = cache.ped
+        local p = GetEntityCoords(ped)
+        local gw = GlobalState.weather
+        local line = ('[dps-studio] roomlight info: clock %02d:%02d | weather %s -> %s | timecycle %d | transition %d | extra %d | interior %d | rain %.2f | at %.1f %.1f %.1f | inside %s | server weather %s')
+            :format(GetClockHours(), GetClockMinutes(), tostring(GetPrevWeatherTypeHashName()), tostring(GetNextWeatherTypeHashName()),
+                GetTimecycleModifierIndex(), GetTimecycleTransitionModifierIndex(), GetExtraTimecycleModifierIndex(),
+                GetInteriorFromEntity(ped), GetRainLevel(), p.x, p.y, p.z, json.encode(inside),
+                type(gw) == 'table' and json.encode(gw):sub(1, 200) or tostring(gw))
+        print(line)
+        return lib.notify({ type = 'inform', description = ('Clock %02d:%02d written to your log'):format(GetClockHours(), GetClockMinutes()) })
+    end
+    if not name or name == 'off' then
+        ClearTimecycleModifier()
+        roomLight = nil
+        return lib.notify({ type = 'inform', description = 'Room light back to normal' })
+    end
+    local s = math.max(0.0, math.min(1.0, tonumber(args[2]) or 1.0))
+    SetTimecycleModifier(name)
+    SetTimecycleModifierStrength(s)
+    roomLight = name
+    print(('[dps-studio] roomlight %s %.2f'):format(name, s))
+    lib.notify({ type = 'inform', description = ('Room light: %s at %.2f. /roomlight off to undo'):format(name, s) })
+end, false)
+
 -- Inside a room the world clock and rain are paused for this player only, through the same
 -- events the house system uses (dps-weatherbridge turns them into night light, no rain).
 local function setInside(name, on)
     if (inside[name] or false) == on then return end
     inside[name] = on or nil
+    if not on and roomLight then ClearTimecycleModifier(); roomLight = nil end
     local r = StudioC.rooms[name]
     if r and r.data.kind == 'ipl' then
         -- a real interior (each serves one room): show the room's style and furniture to the
@@ -176,10 +211,42 @@ function StudioC.Move(to, heading, roomName)
     return true
 end
 
-local function door(key, coords, text, onUse)
+---DPS 2026-10-21 (Damon): a drive-in room. The driver takes the car through the door with
+---everyone in it; the passengers' games hear from the server that they are inside (or out).
+function StudioC.MoveCar(to, heading, roomName, on)
+    local car = cache.vehicle
+    if not car or GetPedInVehicleSeat(car, -1) ~= cache.ped then
+        return lib.notify({ type = 'inform', description = 'The driver takes the car through' })
+    end
+    DoScreenFadeOut(300)
+    Wait(350)
+    if on and not StudioC.SpawnRoom(roomName) then
+        DoScreenFadeIn(300)
+        return lib.notify({ type = 'error', description = 'This room did not load. Try again in a moment.' })
+    end
+    FreezeEntityPosition(car, true)
+    RequestCollisionAtCoord(to.x, to.y, to.z)
+    SetEntityCoords(car, to.x, to.y, to.z, false, false, false, false)
+    SetEntityHeading(car, (heading or 0.0) + 0.0)
+    local t = GetGameTimer() + 3000
+    while not HasCollisionLoadedAroundEntity(car) and GetGameTimer() < t do Wait(50) end
+    SetVehicleOnGroundProperly(car)
+    local ids = {}
+    for seat = 0, GetVehicleMaxNumberOfPassengers(car) - 1 do
+        local ped = GetPedInVehicleSeat(car, seat)
+        local pl = ped ~= 0 and NetworkGetPlayerIndexFromPed(ped) or -1
+        if pl ~= -1 then ids[#ids + 1] = GetPlayerServerId(pl) end
+    end
+    if #ids > 0 then TriggerServerEvent('dps-studio:carried', roomName, on, ids) end
+    FreezeEntityPosition(car, false)
+    DoScreenFadeIn(300)
+    return true
+end
+
+local function door(key, coords, text, onUse, dist)
     return lib.points.new({
         coords = coords,
-        distance = 2.0,
+        distance = dist or 2.0,   -- a drive-in door is wider, so a car can pull up to it
         onEnter = function()
             prompt = key
             local t = type(text) == 'function' and text() or text
@@ -227,6 +294,8 @@ local function addRoom(p, respawn)
         out = shellPos + vec3(p.exit.x, p.exit.y, p.exit.z)
     end
     StudioC.rooms[name] = { data = p, shellPos = shellPos, out = out, door = doorPos }
+    local drive = p.kind == 'ipl' and Studio.InteriorMode(p.ipl) == 'drive'
+    local reach = drive and 6.0 or nil
     points[name] = {
         lib.points.new({
             coords = shellPos,
@@ -237,10 +306,26 @@ local function addRoom(p, respawn)
         }),
         door(name .. ':in', doorPos, function() return StudioC.MayEnter(p) and ('Enter ' .. p.label) or ('Locked · ' .. p.label) end, function()
             if not StudioC.MayEnter(p) then return lib.notify({ type = 'error', description = p.label .. ' is locked' }) end
-            if StudioC.Move(out, p.exit.h, name) then setInside(name, true) end
-        end),
-        door(name .. ':out', out, 'Leave ' .. p.label, function() if StudioC.Move(doorPos, (p.entrance.h + 180.0) % 360.0) then setInside(name, false) end end),
+            if drive and cache.vehicle then
+                if StudioC.MoveCar(out, p.exit.h, name, true) == true then setInside(name, true) end
+            elseif StudioC.Move(out, p.exit.h, name) then setInside(name, true) end
+        end, reach),
+        door(name .. ':out', out, 'Leave ' .. p.label, function()
+            if drive and cache.vehicle then
+                if StudioC.MoveCar(doorPos, (p.entrance.h + 180.0) % 360.0, name, false) == true then setInside(name, false) end
+            elseif StudioC.Move(doorPos, (p.entrance.h + 180.0) % 360.0) then setInside(name, false) end
+        end, reach),
     }
+    -- DPS 2026-10-19 (Damon): extra door pairs, e.g. the airport ops office's second exit into the terminal.
+    -- p.exits = { { from = offset inside the shell {x,y,z,h}, to = world spot outside {x,y,z,h} }, ... }
+    for i, e in ipairs(p.kind ~= 'ipl' and p.exits or {}) do
+        local inPos, world, pts = shellPos + vec3(e.from.x, e.from.y, e.from.z), vec3(e.to.x, e.to.y, e.to.z), points[name]
+        pts[#pts + 1] = door(name .. ':x' .. i .. 'out', inPos, 'Leave ' .. p.label, function() if StudioC.Move(world, e.to.h) then setInside(name, false) end end)
+        pts[#pts + 1] = door(name .. ':x' .. i .. 'in', world, function() return StudioC.MayEnter(p) and ('Enter ' .. p.label) or ('Locked · ' .. p.label) end, function()
+            if not StudioC.MayEnter(p) then return lib.notify({ type = 'error', description = p.label .. ' is locked' }) end
+            if StudioC.Move(inPos, e.from.h, name) then setInside(name, true) end
+        end)
+    end
     if respawn and (p.kind ~= 'ipl' or inside[name]) then CreateThread(function() StudioC.SpawnRoom(name) end) end   -- redraw at once after an edit
 end
 
@@ -349,3 +434,10 @@ AddEventHandler('onResourceStop', function(res)
     if IsScreenFadedOut() or IsScreenFadingOut() then DoScreenFadeIn(0) end
     for name in pairs(StudioC.rooms) do removeRoom(name) end
 end)
+
+-- DPS 2026-10-21: the driver of a drive-in room's car took us through its door
+RegisterNetEvent('dps-studio:carried', function(name, on)
+    if type(name) ~= 'string' or not StudioC.rooms[name] then return end
+    setInside(name, on == true)
+end)
+
