@@ -119,6 +119,20 @@ with a door wherever you want it. Each interior can be used once.
 Each of these is optional except `ox_lib` and `oxmysql`. A missing one switches off its own
 feature and nothing else.
 
+## Recent changes
+
+All 12 November 2026, version 1.6.0.
+
+- **Owners and managers.** A room or portal has an owner, who can be a person or a group. The owner sets who gets in and can name managers to do it for them. Group leaders manage by rank until the owner says otherwise.
+- **Portals.** Two places joined like a door. Make one side, go wherever the other side is, and finish it later from the Portals tab. A portal takes the same lock rules as a room.
+- **Locks.** People, jobs and gangs from a rank up, key items, and a passcode.
+- **Place the shell.** A ghost of the shell is shown while you move and turn it into place, so a shell can sit inside a real building. Each room keeps its own depth.
+- **Buttons for everything.** Room tools (owner, manage, move the shell, add or remove an exit) are buttons in the panel. Nothing needs a typed command.
+- **`/studio`.** The panel opens with `/studio`. It was `/admin`.
+- **Esc.** Pressing Esc while Studio is in use closes the Studio screen and never opens the game's pause menu.
+- **Shell notes.** All 216 shells now carry a note on their pack, use and type.
+- **Game interiors.** The interior list reads from `bob74_ipl`. Only closed interiors are listed, and each can be used once.
+
 ## Other DPS scripts
 
 All of these are made for DelPerroSands and run together on one Qbox server. Each one works on
