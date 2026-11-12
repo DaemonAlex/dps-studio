@@ -2,6 +2,13 @@
 
 Admin toolkit for Qbox servers: build walk-in rooms, place furniture, edit doors, mark spots and inspect objects from one panel opened with `/studio`.
 
+## What it is for
+
+Rooms, doors and portals that the people who use them can run themselves. An admin builds a room
+or joins two places with a portal once. After that the owner decides who gets in: people, jobs
+and gangs from a rank up, a key item, or a passcode. Owners can hand that job to managers. Staff
+do not have to be called every time someone joins a business.
+
 ## Features
 
 Everything below is admin only (ACE `dps.entityselector`) unless it says "all players".
@@ -70,6 +77,75 @@ Used by the code, needed for the matching feature:
 The Doors tab button runs `/doorlock`. The panel's fleet button runs `/fleet`. Those commands come from other resources.
 
 The code does not state a minimum game build. It needs Lua 5.4 (`lua54 'yes'`).
+
+## On its own, and with other scripts
+
+**On its own.** With only `ox_lib`, `oxmysql` and Qbox, Studio builds portals, marks spots,
+inspects objects and saves looks. A portal is the simplest useful thing it does: stand at an
+office door, save one side, walk to the roof, save the other. Players now walk between them, and
+the owner decides who may.
+
+**With a paid housing script.** With qs-housing installed, Studio reads its shells and furniture
+and turns them into rooms anywhere on the map: an office above a shop, a back room behind a bar, a
+gang safehouse. Studio does not sell or rent homes and does not replace qs-housing. It uses the
+same shells for places that are not homes, so one purchase does two jobs.
+
+**With shell packs.** Every shell pack you add to qs-housing shows up in Studio with notes on
+what it is good for. A ghost of the shell is shown while you place it, so a shell can be set
+inside a real building without trapping players in a wall.
+
+**With ox_doorlock.** Real doors on the map get the same owner, manager and lock rules as Studio
+rooms, edited from the same panel.
+
+**With an ox_inventory based inventory.** A room or portal can ask for a key item. Hand out the
+item and you have handed out the key.
+
+**With bob74_ipl.** The game's own closed interiors (offices, clubhouses, bunkers) become rooms
+with a door wherever you want it. Each interior can be used once.
+
+## Works with
+
+| Resource | How |
+|---|---|
+| qbx_core | Job and gang lists, ranks and player data, for access rules and the owner pickers. |
+| qs-housing | Shells and furniture are read from its config files. Studio does not change them. |
+| ox_doorlock | The Doors tab edits its doors, and room doors use its access hook. |
+| ox_inventory, or [dps-inventory](https://github.com/DaemonAlex/dps-inventory) | Key items: the item list for the picker and the check at a door. |
+| bob74_ipl | Game interiors used as rooms, with their styles. Each interior can be used once. |
+| screencapture | The photo booth and `/mapflyover`. |
+| A qb-weathersync style weather resource | Holds the clock inside rooms, the booth and the flyover. |
+| [dps-fleet](https://github.com/DaemonAlex/dps-fleet) | The panel's fleet button opens it. |
+
+Each of these is optional except `ox_lib` and `oxmysql`. A missing one switches off its own
+feature and nothing else.
+
+## Other DPS scripts
+
+All of these are made for DelPerroSands and run together on one Qbox server. Each one works on
+its own. The ones marked "pairs with" do more when both are running.
+
+| Script | What it does |
+|---|---|
+| [dps-inventory](https://github.com/DaemonAlex/dps-inventory) | The inventory: ox_inventory with equipment slots, backpacks, armour plates and a self status panel, in the DelPerroSands colours. |
+| [dps-medical](https://github.com/DaemonAlex/dps-medical) | Patient records, illness and diagnostic tests. A companion to wasabi_ambulance. Pairs with dps-inventory: symptoms and diagnoses show on the status panel. |
+| [dps-insurance](https://github.com/DaemonAlex/dps-insurance) | Ties m-Insurance into the MDT, impound, hospital and medical chart. Pairs with dps-medical. |
+| [dps-shops](https://github.com/DaemonAlex/dps-shops) | Shop clerks who greet and react to a robbery, then player-owned shops. |
+| [dps-fleet](https://github.com/DaemonAlex/dps-fleet) | Vehicle browser and workshop on one panel: extras, liveries and mods for emergency vehicles. |
+| [dps-parking](https://github.com/DaemonAlex/dps-parking) | Parking with valet, impound, violations and reserved spots. |
+| [dps-vehiclepersistence](https://github.com/DaemonAlex/dps-vehiclepersistence) | Vehicles stay where they were parked. Pairs with dps-parking. |
+| [dps-towjob](https://github.com/DaemonAlex/dps-towjob) | Queue-based tow job with jg-mechanic integration. |
+| [dps-services](https://github.com/DaemonAlex/dps-services) | Request a tow and follow it live on the lb-phone and lb-tablet. Pairs with dps-towjob. |
+| [dps-autoshops](https://github.com/DaemonAlex/dps-autoshops) | Self-service repair shops when no mechanic is on duty. |
+| [dps-cityworker](https://github.com/DaemonAlex/dps-cityworker) | City infrastructure job and career. |
+| [dps-ainpcs](https://github.com/DaemonAlex/dps-ainpcs) | NPCs you can talk to, with trust, quests and intel. |
+| [dps-badpeds](https://github.com/DaemonAlex/dps-badpeds) | Police interaction with NPCs: stops, arrests, intel and jail records. |
+| [dps-gangwars](https://github.com/DaemonAlex/dps-gangwars) | Ambient gang NPCs, territory population and war reinforcements. |
+| [dps-rotations](https://github.com/DaemonAlex/dps-rotations) | Moves dealers, harvests and other spots on a fixed schedule. |
+| [dps-trains](https://github.com/DaemonAlex/dps-trains) | The train system. Pairs with dps-trains-stock, dps-traintools and dps-transitapp. |
+| [dps-transitapp](https://github.com/DaemonAlex/dps-transitapp) | Live train arrival boards on the lb-phone. |
+| [dps-faceplant](https://github.com/DaemonAlex/dps-faceplant) | City help, reports and staff tools on the lb-phone and lb-tablet. |
+| [dps-chat](https://github.com/DaemonAlex/dps-chat) | A command box for voice-only servers. No chat feed. |
+| [dps-filmmode](https://github.com/DaemonAlex/dps-filmmode) | One key hides every HUD layer and gives a smooth free camera for recording. |
 
 ## Installation
 
