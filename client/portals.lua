@@ -6,7 +6,8 @@
 --   /portals    the list (also the door button on the /studio panel): add the other side here,
 --               move a side, rename, change the words, allow cars, lock it, go to it, remove it.
 -- A portal with one side is saved for staff and shows nothing to players until it has both.
--- The lock is the room lock: everyone, or jobs and gangs from a rank up, named people, a passcode.
+-- A portal is a door: it has the same owner, managers and lock as a room (people, jobs and gangs
+-- from a rank up, key items, a passcode). Its owner manages it from the portal itself with G.
 
 StudioC = StudioC or {}
 
@@ -28,6 +29,18 @@ function StudioC.AskCode(kind, key, label)
     if ok then codeOk[k] = true return true end
     if err then note('error', err) end
     return false
+end
+
+---A live portal by its id, and the one whose side this player stands at (for the manage menu and /roomowner).
+function StudioC.PortalData(id) return live[id] end
+function StudioC.PortalNear()
+    local me = GetEntityCoords(cache.ped)
+    local best, bestD
+    for id, p in pairs(live) do
+        local d = math.min(#(me - vec3(p.a.x, p.a.y, p.a.z)), #(me - vec3(p.b.x, p.b.y, p.b.z)))
+        if d <= 4.0 and (not bestD or d < bestD) then best, bestD = id, d end
+    end
+    return best
 end
 
 local function mayUse(p)
@@ -66,10 +79,17 @@ local function side(p, key, at, to, words)
             showing = key
             local open = mayUse(p)
             local text = open and words or ((p.access and p.access.code) and ('Enter the code · ' .. p.label) or ('Locked · ' .. p.label))
-            nui({ action = 'prompt', key = text:find('^Locked') and '' or 'E', text = text })
+            local locked = text:find('^Locked') ~= nil
+            -- a portal is a door: its owner and managers run its list from here, like a room's
+            if not locked and StudioC.MayManage and StudioC.MayManage('portal:' .. p.id) then text = text .. '  ·  G  Manage' end
+            nui({ action = 'prompt', key = locked and '' or 'E', text = text })
         end,
         onExit = function() if showing == key then showing = nil; nui({ action = 'prompt' }) end end,
         nearby = function()
+            if IsControlJustPressed(0, 47) and not StudioC.busy and not StudioC.moving
+                and StudioC.MayManage and StudioC.MayManage('portal:' .. p.id) then
+                return StudioC.OpenManage('portal:' .. p.id)
+            end
             if not IsControlJustPressed(0, 38) or StudioC.busy or StudioC.moving then return end
             StudioC.moving = true
             CreateThread(function()
@@ -138,79 +158,7 @@ end
 
 local openList   -- forward
 
-local function groupOf(info, name) for _, g in ipairs(info.groups or {}) do if g.name == name then return g end end end
-
-local function pickGroup(info, title, preset)
-    local group = preset
-    if not group then
-        local opts = {}
-        for _, g in ipairs(info.groups or {}) do opts[#opts + 1] = { value = g.name, label = ('%s (%s)'):format(g.label, g.kind) } end
-        local got = lib.inputDialog(title, { { type = 'select', label = 'Job or gang', options = opts, required = true, searchable = true } })
-        if not got or not got[1] then return nil end
-        group = got[1]
-    end
-    local g, ranks = groupOf(info, group), {}
-    for _, gr in ipairs(g and g.grades or {}) do ranks[#ranks + 1] = { value = tostring(gr.level), label = ('%d · %s'):format(gr.level, gr.name) } end
-    if #ranks == 0 then ranks[1] = { value = '0', label = '0' } end
-    local got = lib.inputDialog(('%s · %s'):format(title, g and g.label or group), {
-        { type = 'select', label = 'Lowest rank', description = 'This rank and every rank above it', options = ranks, required = true, default = ranks[1].value } })
-    if not got or not got[1] then return nil end
-    return group, tonumber(got[1]) or 0
-end
-
-local function pickPerson(info, title)
-    local opts = {}
-    for _, p in ipairs(info.nearby or {}) do opts[#opts + 1] = { value = p.cid, label = p.name } end
-    opts[#opts + 1] = { value = '_type', label = 'Type a citizen ID' }
-    local got = lib.inputDialog(title, { { type = 'select', label = 'Who', description = #opts > 1 and 'People standing near you' or 'Nobody is standing near you', options = opts, required = true, searchable = true } })
-    if not got or not got[1] then return nil end
-    if got[1] ~= '_type' then return got[1] end
-    local typed = lib.inputDialog(title, { { type = 'input', label = 'Citizen ID', required = true, min = 3, max = 20 } })
-    local cid = typed and typed[1] and typed[1]:gsub('%s', '')
-    return (cid and cid ~= '') and cid or nil
-end
-
-local function lockMenu(info, p)
-    local a = p.access or { open = true, groups = {}, characters = {} }
-    local opts = {
-        { title = a.open and 'Open to everyone' or 'Locked to the list', description = a.open and 'Select to lock it to the list below' or 'Select to open it to everyone',
-          icon = a.open and 'lock-open' or 'lock', onSelect = function() set(p.id, 'open', { on = not a.open }); openList(p.id, 'lock') end },
-        { title = 'Add a job or gang', icon = 'users', onSelect = function()
-            local g, grade = pickGroup(info, 'Add a job or gang')
-            if g then set(p.id, 'group_set', { group = g, grade = grade }) end
-            openList(p.id, 'lock')
-        end },
-        { title = 'Add a person', icon = 'user-plus', onSelect = function()
-            local cid = pickPerson(info, 'Add a person')
-            if cid then set(p.id, 'person_add', { cid = cid }) end
-            openList(p.id, 'lock')
-        end },
-        { title = a.passcode and 'Passcode: set' or 'Passcode: none', description = 'Anyone with the code gets through. Select to set, change or clear it.', icon = 'key', onSelect = function()
-            local got = lib.inputDialog('Passcode', { { type = 'input', label = 'New passcode', description = 'Letters and numbers, up to 12. Leave empty to clear it.', max = 12, password = true } })
-            if got then set(p.id, 'passcode', { code = got[1] and got[1] ~= '' and got[1] or nil }) end
-            openList(p.id, 'lock')
-        end },
-    }
-    local names = {}
-    for g in pairs(a.groups or {}) do names[#names + 1] = g end
-    table.sort(names)
-    for _, g in ipairs(names) do
-        local gg = groupOf(info, g)
-        opts[#opts + 1] = { title = (gg and gg.label or g) .. (' · rank %d and up'):format(a.groups[g]), description = 'Select to remove', icon = 'users', onSelect = function()
-            set(p.id, 'group_remove', { group = g }); openList(p.id, 'lock')
-        end }
-    end
-    for _, cid in ipairs(a.characters or {}) do
-        local n = info.names and info.names[cid]
-        opts[#opts + 1] = { title = (n and n ~= '') and n or cid, description = 'Select to remove', icon = 'user', onSelect = function()
-            set(p.id, 'person_remove', { cid = cid }); openList(p.id, 'lock')
-        end }
-    end
-    lib.registerContext({ id = 'dps_portal_lock', title = 'Who may use · ' .. p.label, menu = 'dps_portal_one', options = opts })
-end
-
 local function oneMenu(info, p)
-    lockMenu(info, p)
     local ready = p.b ~= nil
     local a = p.access or { open = true }
     local opts = {}
@@ -239,7 +187,12 @@ local function oneMenu(info, p)
         openList(p.id)
     end }
     opts[#opts + 1] = { title = p.car and 'Cars: allowed' or 'Cars: on foot only', description = 'Select to change. With cars allowed the driver takes the car through.', icon = 'car', onSelect = function() set(p.id, 'car', not p.car); openList(p.id) end }
-    opts[#opts + 1] = { title = a.open and 'Lock: open to everyone' or 'Lock: locked to its list', description = 'Jobs and gangs from a rank up, named people, a passcode', icon = a.open and 'lock-open' or 'lock', menu = 'dps_portal_lock', arrow = true }
+    -- the same lock, owner and managers as a room door (client/manage.lua)
+    local own = p.manage and p.manage.owner
+    opts[#opts + 1] = { title = a.open and 'Who may use it: everyone' or 'Who may use it: its list', description = 'People, jobs and gangs from a rank up, key items, a passcode, and who manages it', icon = a.open and 'lock-open' or 'lock',
+        onSelect = function() StudioC.OpenManage('portal:' .. p.id) end, arrow = true }
+    opts[#opts + 1] = { title = 'Owner: ' .. (own and own.id or 'nobody yet'), description = 'The owner runs the list from the portal itself (G), with no staff needed', icon = 'crown',
+        onSelect = function() StudioC.SetOwner('portal:' .. p.id); openList(p.id) end }
     opts[#opts + 1] = { title = 'Remove this portal', icon = 'trash', onSelect = function()
         if lib.alertDialog({ header = 'Remove ' .. p.label .. '?', content = 'Both sides go. It stays in the Studio history.', centered = true, cancel = true }) == 'confirm' then
             set(p.id, 'delete')
@@ -265,7 +218,7 @@ openList = function(id, sub)
     lib.registerContext({ id = 'dps_portal_list', title = ('Portals (%d)'):format(#info.list), options = opts })
     if chosen then
         oneMenu(info, chosen)
-        return lib.showContext(sub == 'lock' and 'dps_portal_lock' or 'dps_portal_one')
+        return lib.showContext('dps_portal_one')
     end
     lib.showContext('dps_portal_list')
 end

@@ -1001,9 +1001,35 @@ local function nearby(src)
     return out
 end
 
----What the door menu shows. nil when this player does not manage the room.
+-- DPS 2026-11-12 (Damon: "the portal is like a door really, should have the same perms"): everything
+-- below works on a room (its name) or on a portal ('portal:<id>'). Same owner, managers and lock.
+local portalByKey, portalKeep   -- filled in by the portals section further down
+
+local function manageTarget(key)
+    if type(key) ~= 'string' then return nil end
+    local id = key:match('^portal:(%d+)$')
+    if id then return portalByKey and portalByKey(tonumber(id)) or nil, 'portal' end
+    return rooms[key], 'room'
+end
+
+local itemCache, itemSetCache
+---Every inventory item (name, label), for the key item picker and its check.
+local function itemList()
+    if itemCache then return itemCache, itemSetCache end
+    local list, set = {}, {}
+    pcall(function()
+        for name, it in pairs(exports.ox_inventory:Items() or {}) do
+            if type(name) == 'string' then list[#list + 1] = { name = name, label = type(it) == 'table' and it.label or name }; set[name] = true end
+        end
+    end)
+    table.sort(list, function(a, b) return tostring(a.label):lower() < tostring(b.label):lower() end)
+    if #list > 0 then itemCache, itemSetCache = list, set end
+    return list, set
+end
+
+---What the door menu shows. nil when this player does not manage the room or portal.
 lib.callback.register('dps-studio:manageInfo', function(src, name)
-    local room = type(name) == 'string' and rooms[name]
+    local room = manageTarget(name)
     if not room then return nil end
     local me = person(src)
     if not Studio.MayManage(room.manage, me) then return nil end
@@ -1015,9 +1041,9 @@ lib.callback.register('dps-studio:manageInfo', function(src, name)
         for _, c in ipairs(manage.characters) do want(c) end
         if manage.owner.kind == 'person' then want(manage.owner.id) end
     end
-    return { name = room.name, label = room.label, access = access, manage = manage,
+    return { name = name, label = room.label, access = access, manage = manage,
              ownerSide = Studio.IsOwnerSide(room.manage, me), staff = me.staff,
-             names = namesFor(cids), groups = groupList(), nearby = nearby(src) }
+             names = namesFor(cids), groups = groupList(), nearby = nearby(src), items = itemList() }
 end)
 
 local lastManage = {}
@@ -1026,17 +1052,23 @@ lib.callback.register('dps-studio:manageDo', function(src, name, op, arg)
     local now = GetGameTimer()
     if lastManage[src] and now - lastManage[src] < 300 then return false, 'One change at a time' end
     lastManage[src] = now
-    local room = type(name) == 'string' and rooms[name]
-    if not room then return false, 'That room is gone' end
+    local room, kind = manageTarget(name)
+    if not room then return false, 'That is gone' end
     if type(op) ~= 'string' or type(arg) ~= 'table' then return false, 'Bad request' end
     local me = person(src)
     local _, set = groupList()
+    local _, items = itemList()
     -- try it on a copy first: a refused change never touches the room, and the history line is known
     local trial = Studio.Copy(room)
-    local ok, words = Studio.ManageApply(trial, me, op, arg, next(set) and set or nil)
+    local ok, words = Studio.ManageApply(trial, me, op, arg, next(set) and set or nil, next(items) and items or nil)
     if not ok then return false, words end
     if (op == 'person_add' or op == 'manager_add') and not MySQL.scalar.await('SELECT 1 FROM players WHERE citizenid = ?', { arg.cid }) then
         return false, 'Nobody has that citizen ID'
+    end
+    if kind == 'portal' then
+        room.access, room.manage = trial.access, trial.manage
+        portalKeep(src, room, words)
+        return true, words
     end
     local saved, err = change(src, name, 'manage', words, function()
         room.access, room.manage = trial.access, trial.manage
@@ -1053,8 +1085,8 @@ AddEventHandler('playerDropped', function() lastManage[source] = nil end)
 ---A new owner starts with no managers: the old owner's choices do not carry over.
 lib.callback.register('dps-studio:roomOwner', function(src, name, owner)
     if not allowed(src) then return false, 'Setting the owner is for staff' end
-    local room = type(name) == 'string' and rooms[name]
-    if not room then return false, 'No room with that name' end
+    local room, kind = manageTarget(name)
+    if not room then return false, 'Nothing with that name' end
     local manage, words
     if owner ~= nil then
         manage = Studio.CleanManage({ owner = owner })
@@ -1069,6 +1101,11 @@ lib.callback.register('dps-studio:roomOwner', function(src, name, owner)
         end
     else
         words = ('%s has no owner now (staff only)'):format(room.label)
+    end
+    if kind == 'portal' then
+        room.manage = manage
+        portalKeep(src, room, words)
+        return true, words
     end
     local ok, err = change(src, name, 'owner', words, function()
         room.manage = manage
@@ -1204,6 +1241,7 @@ local function portalPublic()
 end
 
 local function portalBroadcast() TriggerClientEvent('dps-studio:portals', -1, portalPublic()) end
+portalByKey = function(id) return portals[id] end
 
 local function portalSave(src, p, words)
     MySQL.update.await('UPDATE dps_studio_portals SET data = ? WHERE id = ?', { json.encode(p), p.id })
@@ -1212,6 +1250,7 @@ local function portalSave(src, p, words)
     lib.print.info(('%s: %s'):format(who(src), words))
     portalBroadcast()
 end
+portalKeep = portalSave
 
 CreateThread(function()
     while not ready do Wait(200) end   -- the tables exist once the room start-up has run

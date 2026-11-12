@@ -343,5 +343,26 @@ do
     check('portal: a locked portal lets the listed rank through', Studio.MayEnterRoom(port, { job = 'police', grade = 1 }) and not Studio.MayEnterRoom(port, { job = 'police', grade = 0 }))
 end
 
+-- a portal is a door: the same owner, managers, groups, people, key items and passcode (DPS 2026-11-12)
+do
+    local A, B = { x = 1, y = 2, z = 3, h = 0 }, { x = 9, y = 9, z = 9, h = 0 }
+    local boss = { citizenid = 'B1', job = 'police', grade = 4, jobBoss = true }
+    local cop = { citizenid = 'C1', job = 'police', grade = 1 }
+    local key = { citizenid = 'K1', has = function(i) return i == 'office_key' end }
+    local nokey = { citizenid = 'N1', has = function() return false end }
+    local port = { label = 'Lift', a = A, b = B, access = { open = false }, manage = { owner = { kind = 'group', id = 'police' } } }
+    check('portal owner: the group boss manages, a lower rank does not', Studio.MayManage(port.manage, boss) and not Studio.MayManage(port.manage, cop))
+    check('portal owner: the boss walks through a locked portal', Studio.MayEnterRoom(port, boss) and not Studio.MayEnterRoom(port, cop))
+    check('key item: the owner adds one', Studio.ManageApply(port, boss, 'item_add', { item = 'office_key' }, nil, { office_key = true }) and port.access.items[1] == 'office_key')
+    check('key item: whoever holds it gets through', Studio.MayEnterRoom(port, key) and not Studio.MayEnterRoom(port, nokey))
+    check('key item: unknown item refused', not Studio.ManageApply(port, boss, 'item_add', { item = 'made_up' }, nil, { office_key = true }))
+    check('key item: same item twice refused', not Studio.ManageApply(port, boss, 'item_add', { item = 'office_key' }, nil, { office_key = true }))
+    check('key item: an outsider cannot add one', not Studio.ManageApply(port, cop, 'item_add', { item = 'office_key' }, nil, { office_key = true }))
+    check('key item: removed again', Studio.ManageApply(port, boss, 'item_remove', { item = 'office_key' }) and #port.access.items == 0 and not Studio.MayEnterRoom(port, key))
+    local pub = Studio.PublicPortal(port)
+    check('portal: players are told its owner and key items, never its code', pub.manage.owner.id == 'police' and pub.access.passcode == nil)
+    check('portal: the boss names a manager, who then changes the list', Studio.ManageApply(port, boss, 'manager_add', { cid = 'C1' }) and Studio.ManageApply(port, cop, 'group_set', { group = 'police', grade = 1 }, { police = true }) and Studio.MayEnterRoom(port, cop))
+end
+
 print(('%d checks, %s'):format(n, fails == 0 and 'ALL PASS' or (fails .. ' FAILED')))
 os.exit(fails == 0 and 0 or 1)

@@ -14,9 +14,12 @@ StudioC = StudioC or {}
 local function note(kind, text) lib.notify({ type = kind, description = text }) end
 
 ---The room this player is in, or the one whose door (or extra door) they stand at.
+---A portal counts too (a portal is a door): standing at one of its sides gives 'portal:<id>'.
 local function roomNear()
     local here = StudioC.RoomHere and StudioC.RoomHere()
     if here then return here end
+    local portal = StudioC.PortalNear and StudioC.PortalNear()
+    if portal then return 'portal:' .. portal end
     local me = GetEntityCoords(cache.ped)
     local best, bestD
     for name, r in pairs(StudioC.rooms or {}) do
@@ -31,10 +34,28 @@ end
 
 ---May this player manage that room? Used for the door prompt; the server checks again on every change.
 function StudioC.MayManage(name)
+    local id = type(name) == 'string' and name:match('^portal:(%d+)$')
+    if id then
+        local p = StudioC.PortalData and StudioC.PortalData(tonumber(id))
+        if not p then return false end
+        if StudioC.isAdmin then return true end
+        return Studio.MayManage(p.manage, StudioC.Me())
+    end
     local r = StudioC.rooms and StudioC.rooms[name]
     if not r then return false end
     if StudioC.isAdmin then return true end
     return Studio.MayManage(r.data.manage, StudioC.Me())
+end
+
+---The words on a room's or portal's door, for menu titles.
+local function labelOf(name)
+    local id = type(name) == 'string' and name:match('^portal:(%d+)$')
+    if id then
+        local p = StudioC.PortalData and StudioC.PortalData(tonumber(id))
+        return p and p.label or 'Portal'
+    end
+    local r = StudioC.rooms and StudioC.rooms[name]
+    return r and r.data.label or tostring(name)
 end
 
 local function isStaff()
@@ -179,12 +200,38 @@ local function groupsMenu(info, name, forManagers)
     lib.registerContext({ id = id, title = forManagers and 'Managers · jobs and gangs' or 'Who gets in · jobs and gangs', menu = forManagers and 'dps_room_managers' or 'dps_room_manage', options = opts })
 end
 
+local function itemLabel(info, name)
+    for _, it in ipairs(info.items or {}) do if it.name == name then return it.label end end
+    return name
+end
+
+---Key items: whoever carries one gets in. The owner hands them out, so no staff are needed.
+local function itemsMenu(info, name)
+    local opts = {
+        { title = 'Add a key item', description = 'Anyone carrying this item gets in', icon = 'key', onSelect = function()
+            local list = {}
+            for _, it in ipairs(info.items or {}) do list[#list + 1] = { value = it.name, label = ('%s (%s)'):format(it.label, it.name) } end
+            if #list == 0 then note('error', 'The item list did not load. Try again.'); return open(name, 'dps_room_items') end
+            local got = lib.inputDialog('Add a key item', { { type = 'select', label = 'Item', options = list, required = true, searchable = true } })
+            if not got or not got[1] then return open(name, 'dps_room_items') end
+            send(name, 'item_add', { item = got[1] }, 'dps_room_items')
+        end },
+    }
+    for _, it in ipairs(info.access.items or {}) do
+        opts[#opts + 1] = { title = itemLabel(info, it), description = 'Select to remove', icon = 'key', onSelect = function()
+            send(name, 'item_remove', { item = it }, 'dps_room_items')
+        end }
+    end
+    lib.registerContext({ id = 'dps_room_items', title = 'Who gets in · key items', menu = 'dps_room_manage', options = opts })
+end
+
 local function count(t) local n = 0; for _ in pairs(t or {}) do n = n + 1 end; return n end
 
 local function build(info, name)
     local a, m = info.access, info.manage
     peopleMenu(info, name, false)
     groupsMenu(info, name, false)
+    itemsMenu(info, name)
 
     local opts = {
         { title = 'Owner: ' .. ownerWords(info), description = leaderWords(info) and ('Leaders: ' .. leaderWords(info)) or nil, icon = 'crown', readOnly = true },
@@ -192,6 +239,7 @@ local function build(info, name)
           icon = a.open and 'lock-open' or 'lock', onSelect = function() send(name, 'open', { on = not a.open }) end },
         { title = ('People (%d)'):format(#a.characters), description = 'Named people who get in', icon = 'user', menu = 'dps_room_people', arrow = true },
         { title = ('Jobs and gangs (%d)'):format(count(a.groups)), description = 'Groups that get in, from a rank up', icon = 'users', menu = 'dps_room_groups', arrow = true },
+        { title = ('Key items (%d)'):format(#(a.items or {})), description = 'Items that open it for whoever carries one', icon = 'key', menu = 'dps_room_items', arrow = true },
         { title = a.passcode and 'Passcode: set' or 'Passcode: none', description = 'Anyone with the code gets in. Select to set, change or clear it.', icon = 'key', onSelect = function()
             local got = lib.inputDialog('Passcode', { { type = 'input', label = 'New passcode', description = 'Letters and numbers, up to 12. Leave empty to clear it.', max = 12, password = true } })
             if not got then return open(name) end
@@ -220,7 +268,7 @@ local function build(info, name)
         lib.registerContext({ id = 'dps_room_managers', title = 'Who manages this room', menu = 'dps_room_manage', options = mopts })
         opts[#opts + 1] = { title = 'Managers', description = 'Who else may change this list', icon = 'user-shield', menu = 'dps_room_managers', arrow = true }
     elseif not m then
-        opts[#opts + 1] = { title = 'No owner yet', description = 'Staff: stand here and type /roomowner', icon = 'circle-info', readOnly = true }
+        opts[#opts + 1] = { title = 'No owner yet', description = 'Staff set the owner: stand here and type /roomowner', icon = 'circle-info', readOnly = true }
     end
 
     lib.registerContext({ id = 'dps_room_manage', title = 'Manage · ' .. info.label, options = opts })
@@ -240,16 +288,15 @@ end
 
 RegisterCommand('roommanage', function()
     local name = roomNear()
-    if not name then return note('error', 'Stand at a room door, or inside the room') end
+    if not name then return note('error', 'Stand at a room door or a portal, or inside the room') end
     StudioC.OpenManage(name)
 end, false)
 
 -- ---------------------------------------------------------------- staff: owner
-RegisterCommand('roomowner', function()
+---Staff: pick who owns a room or portal (a person, a job or gang, or nobody).
+function StudioC.SetOwner(name)
     if not isStaff() then return note('error', 'Staff only') end
-    local name = roomNear()
-    if not name then return note('error', 'Stand at a room door, or inside the room') end
-    local r = StudioC.rooms[name]
+    local label = labelOf(name)
     local pick = lib.callback.await('dps-studio:ownerPickers', false)
     if not pick then return note('error', 'Staff only') end
     local opts = {}
@@ -258,19 +305,19 @@ RegisterCommand('roomowner', function()
     opts[#opts + 1] = { value = 'type', label = 'A person, by citizen ID' }
     opts[#opts + 1] = { value = 'group', label = 'A job or gang' }
     opts[#opts + 1] = { value = 'none', label = 'Nobody (staff only)' }
-    local got = lib.inputDialog('Owner of ' .. r.data.label, { { type = 'select', label = 'Who owns this room', required = true, options = opts, searchable = true } })
+    local got = lib.inputDialog('Owner of ' .. label, { { type = 'select', label = 'Who owns it', required = true, options = opts, searchable = true } })
     if not got or not got[1] then return end
     local owner
     if got[1] == 'none' then
         owner = nil
     elseif got[1] == 'type' then
-        local typed = lib.inputDialog('Owner of ' .. r.data.label, { { type = 'input', label = 'Citizen ID', required = true, min = 3, max = 20 } })
+        local typed = lib.inputDialog('Owner of ' .. label, { { type = 'input', label = 'Citizen ID', required = true, min = 3, max = 20 } })
         if not typed or not typed[1] then return end
         owner = { kind = 'person', id = (typed[1]:gsub('%s', '')) }
     elseif got[1] == 'group' then
         local gopts = {}
         for _, g in ipairs(pick.groups or {}) do gopts[#gopts + 1] = { value = g.name, label = ('%s (%s)'):format(g.label, g.kind) } end
-        local g = lib.inputDialog('Owner of ' .. r.data.label, { { type = 'select', label = 'Job or gang', description = 'Its boss rank manages the room', required = true, options = gopts, searchable = true } })
+        local g = lib.inputDialog('Owner of ' .. label, { { type = 'select', label = 'Job or gang', description = 'Its boss rank manages it', required = true, options = gopts, searchable = true } })
         if not g or not g[1] then return end
         owner = { kind = 'group', id = g[1] }
     else
@@ -278,6 +325,13 @@ RegisterCommand('roomowner', function()
     end
     local ok, words = lib.callback.await('dps-studio:roomOwner', false, name, owner)
     note(ok and 'success' or 'error', words or (ok and 'Saved' or 'Not saved'))
+end
+
+RegisterCommand('roomowner', function()
+    if not isStaff() then return note('error', 'Staff only') end
+    local name = roomNear()
+    if not name then return note('error', 'Stand at a room door or a portal, or inside the room') end
+    CreateThread(function() StudioC.SetOwner(name) end)
 end, false)
 
 -- ---------------------------------------------------------------- staff: extra doors

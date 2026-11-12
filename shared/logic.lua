@@ -422,14 +422,16 @@ function Studio.MayManage(m, who)
 end
 
 local OWNER_OPS = { manager_add = true, manager_remove = true, mgroup_set = true, mgroup_remove = true, leader_grade = true }
-local MANAGE_OPS = { person_add = true, person_remove = true, group_set = true, group_remove = true, passcode = true, open = true }
+local MANAGE_OPS = { person_add = true, person_remove = true, group_set = true, group_remove = true, passcode = true, open = true,
+                     item_add = true, item_remove = true }
 
 local function has(list, v) for i, x in ipairs(list) do if x == v then return i end end end
 
 ---One change made from the door menu. Checks the right, the values and the limits, then edits
----room.access or room.manage. groupSet (optional) = names that are real jobs or gangs.
+---room.access or room.manage. Works the same on a room and on a portal (a portal is a door).
+---groupSet (optional) = names that are real jobs or gangs; itemSet (optional) = real item names.
 ---@return boolean ok, string words (the error, or the history line)
-function Studio.ManageApply(room, who, op, arg, groupSet)
+function Studio.ManageApply(room, who, op, arg, groupSet, itemSet)
     if type(room) ~= 'table' or type(arg) ~= 'table' then return false, 'Bad request' end
     if not (OWNER_OPS[op] or MANAGE_OPS[op]) then return false, 'Unknown change' end
     local m = Studio.CleanManage(room.manage)
@@ -474,6 +476,21 @@ function Studio.ManageApply(room, who, op, arg, groupSet)
         if a.groups[g] == nil then return false, 'That group is not on the list' end
         a.groups[g] = nil
         words = ('%s: %s removed from access'):format(label, g)
+    elseif op == 'item_add' or op == 'item_remove' then
+        local it = arg.item
+        if type(it) ~= 'string' or not it:match('^[%w_%-]+$') or #it > 60 then return false, 'Pick a key item' end
+        local i = has(a.items, it)
+        if op == 'item_add' then
+            if itemSet and not itemSet[it] then return false, 'That item does not exist' end
+            if i then return false, 'That item is already a key' end
+            if #a.items >= 20 then return false, 'The list is full (20 key items)' end
+            a.items[#a.items + 1] = it
+            words = ('%s: %s is now a key'):format(label, it)
+        else
+            if not i then return false, 'That item is not a key here' end
+            table.remove(a.items, i)
+            words = ('%s: %s is no longer a key'):format(label, it)
+        end
     elseif op == 'passcode' then
         if arg.code == nil or arg.code == '' then
             a.passcode = nil
