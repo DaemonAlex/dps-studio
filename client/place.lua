@@ -251,6 +251,7 @@ local function drawBox(at, h, mn, mx, r, g, b)
 end
 
 function StudioC.PlaceShell(roomName)
+    if StudioC.Touch then StudioC.Touch() end
     if StudioC.busy then return lib.notify({ type = 'error', description = 'Finish what you are doing first' }) end
     local room = StudioC.rooms[roomName]
     if not room then return lib.notify({ type = 'error', description = 'That room is gone' }) end

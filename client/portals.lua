@@ -205,6 +205,7 @@ end
 
 ---The list of every portal, or one portal's menu when id is given.
 openList = function(id, sub)
+    if StudioC.Touch then StudioC.Touch() end
     local info = lib.callback.await('dps-studio:portalList', false)
     if not info then return note('error', 'Staff only') end
     local opts = { { title = 'New portal: one side here', description = 'Starts a portal where you stand. Add the other side later from this list.', icon = 'plus', onSelect = function() ExecuteCommand('portal new') end } }
@@ -237,6 +238,7 @@ local function trace(words) TriggerServerEvent('dps-studio:trace', tostring(word
 
 RegisterCommand('portal', function(_, args)
     trace('/portal typed: ' .. table.concat(args or {}, ' '))
+    if StudioC.Touch then StudioC.Touch() end
     if not isStaff() then return note('error', 'Portals are made by staff') end
     local spot = here()   -- where you stood when you typed it, not where you wander while naming it
     local typed = table.concat(args or {}, ' ')
