@@ -846,3 +846,35 @@ RegisterNUICallback('roomTool', function(d, cb)
         elseif tool == 'roomExitRemove' then StudioC.RoomExit(name, 'remove') end
     end)
 end)
+
+-- ---------------------------------------------------------------- Esc never opens the pause menu in Studio
+-- DPS 2026-11-12 (Damon: "have the esc key disabled for the menu while I'm using /studio, it keeps
+-- interrupting what I'm doing"). Esc closes a Studio screen or menu; the same key press then reached
+-- the game the moment that screen let go, and the pause menu opened on top of the work.
+-- While Studio is in use the pause menu keys are held off: while the panel or one of its menus is up,
+-- while placing or walking, and for a moment after any of them closes. Nothing changes for players,
+-- or for staff who have not touched Studio in the last two minutes.
+function StudioC.Touch() StudioC.activeUntil = GetGameTimer() + 120000 end
+
+CreateThread(function()
+    local wasFocused, focusLost = false, 0
+    while true do
+        local now = GetGameTimer()
+        if open or StudioC.busy then StudioC.activeUntil = now + 120000 end
+        if (StudioC.activeUntil or 0) <= now then
+            wasFocused = false
+            Wait(250)
+        else
+            local focused = IsNuiFocused()
+            if focused then wasFocused = true
+            elseif wasFocused then wasFocused, focusLost = false, now end
+            if focused or open or StudioC.busy or now - focusLost < 800 then
+                DisableControlAction(0, 199, true)   -- P, pause
+                DisableControlAction(0, 200, true)   -- Esc, pause
+                DisableControlAction(0, 322, true)   -- Esc
+                if IsPauseMenuActive() then SetPauseMenuActive(false) end
+            end
+            Wait(0)
+        end
+    end
+end)

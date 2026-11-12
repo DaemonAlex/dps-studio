@@ -143,6 +143,7 @@ local open   -- forward
 
 ---Sends one change, says what happened, and opens the menu again on the fresh list.
 local function send(name, op, arg, back)
+    if StudioC.Touch then StudioC.Touch() end
     local ok, words = lib.callback.await('dps-studio:manageDo', false, name, op, arg or {})
     note(ok and 'success' or 'error', words or (ok and 'Saved' or 'Not saved'))
     open(name, back)
@@ -283,6 +284,7 @@ end
 
 ---Opens the manage menu for a room (never blocks the caller: door prompts call this every frame loop).
 function StudioC.OpenManage(name)
+    if StudioC.Touch then StudioC.Touch() end
     CreateThread(function() open(name) end)
 end
 
@@ -295,6 +297,7 @@ end, false)
 -- ---------------------------------------------------------------- staff: owner
 ---Staff: pick who owns a room or portal (a person, a job or gang, or nobody).
 function StudioC.SetOwner(name)
+    if StudioC.Touch then StudioC.Touch() end
     if not isStaff() then return note('error', 'Staff only') end
     local label = labelOf(name)
     local pick = lib.callback.await('dps-studio:ownerPickers', false)
@@ -345,6 +348,7 @@ end
 ---One more door for a shell room, in two steps: the inside spot, then the outside spot.
 ---word = 'remove' or 'cancel'. name = the room when started from the panel's button (else where you stand).
 function StudioC.RoomExit(name, word)
+    if StudioC.Touch then StudioC.Touch() end
     if not isStaff() then return note('error', 'Staff only') end
     if word == 'cancel' then pending = nil; return note('inform', 'Extra door cancelled') end
 
