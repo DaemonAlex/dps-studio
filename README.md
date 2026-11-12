@@ -133,6 +133,10 @@ All 12 November 2026, version 1.6.0.
 - **Shell notes.** All 216 shells now carry a note on their pack, use and type.
 - **Game interiors.** The interior list reads from `bob74_ipl`. Only closed interiors are listed, and each can be used once.
 
+## Author
+
+Made by [DaemonAlex](https://github.com/DaemonAlex) for DelPerroSands.
+
 ## Other DPS scripts
 
 All of these are made for DelPerroSands and run together on one Qbox server. Each one works on
