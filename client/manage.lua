@@ -342,13 +342,14 @@ local function mySpot()
     return { x = c.x, y = c.y, z = c.z, h = GetEntityHeading(cache.ped) }
 end
 
-RegisterCommand('roomexit', function(_, args)
+---One more door for a shell room, in two steps: the inside spot, then the outside spot.
+---word = 'remove' or 'cancel'. name = the room when started from the panel's button (else where you stand).
+function StudioC.RoomExit(name, word)
     if not isStaff() then return note('error', 'Staff only') end
-    local word = args[1] and args[1]:lower()
     if word == 'cancel' then pending = nil; return note('inform', 'Extra door cancelled') end
 
     if word == 'remove' then
-        local name = roomNear()
+        name = name or roomNear()
         local r = name and StudioC.rooms[name]
         if not r then return note('error', 'Stand at a room door, or inside the room') end
         local exits = r.data.exits or {}
@@ -363,12 +364,15 @@ RegisterCommand('roomexit', function(_, args)
 
     local here = StudioC.RoomHere and StudioC.RoomHere()
     if not pending then
-        if not here then return note('error', 'Start inside the room: stand where the new door should be, facing into the room, and type /roomexit') end
+        if not here then
+            return note('error', name and ('Step 1: go inside ' .. StudioC.rooms[name].data.label .. ', stand where the new door should be, facing into the room, then press Add another door again.')
+                or 'Start inside the room: stand where the new door should be, facing into the room, and type /roomexit')
+        end
         if StudioC.rooms[here].data.kind == 'ipl' then return note('error', 'Extra doors work on shell rooms only') end
         pending = { name = here, spot = mySpot() }
-        return note('inform', 'Inside spot saved. Now stand at the outside spot, facing away from the building, and type /roomexit again. /roomexit cancel to stop.')
+        return note('inform', 'Step 1 done: the inside spot is saved. Step 2: go to the outside spot, face away from the building, then press Add another door again (or type /roomexit). /roomexit cancel stops.')
     end
-    if here then return note('error', 'You are still inside a room. Go to the outside spot, then type /roomexit. /roomexit cancel to stop.') end
+    if here then return note('error', 'You are still inside a room. Go to the outside spot first. /roomexit cancel stops.') end
     local spot = mySpot()   -- people leaving by this door arrive here, facing the way you face now
     local ok, res = lib.callback.await('dps-studio:roomExitAdd', false, pending.name, pending.spot, spot)
     if ok then
@@ -377,6 +381,11 @@ RegisterCommand('roomexit', function(_, args)
     else
         note('error', res or 'Not added')
     end
+end
+
+RegisterCommand('roomexit', function(_, args)
+    local word = args[1] and args[1]:lower()
+    CreateThread(function() StudioC.RoomExit(nil, word) end)
 end, false)
 
 -- ---------------------------------------------------------------- staff: depth

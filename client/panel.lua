@@ -791,3 +791,58 @@ AddEventHandler('onResourceStop', function(res)
     FreezeEntityPosition(cache.ped, false)
     SetNuiFocus(false, false)
 end)
+
+-- ---------------------------------------------------------------- NUI: portals tab and room tools
+-- DPS 2026-11-12 (Damon: "can't we put buttons in studio to do this, not just commands, make it easy").
+-- The Portals tab and the room buttons do with a click what /portal, /portals, /roomowner, /roommanage,
+-- /roomshell and /roomexit do when typed. The commands stay as a second way in.
+RegisterNUICallback('portalList', function(_, cb)
+    local info = lib.callback.await('dps-studio:portalList', false)
+    cb(info and info.list or {})
+end)
+
+RegisterNUICallback('portalNew', function(d, cb)
+    local ok, res = lib.callback.await('dps-studio:portalCreate', false, d.label, mySpot())
+    cb({ ok = ok and true or false, err = not ok and (res or 'Not saved') or nil })
+end)
+
+RegisterNUICallback('portalSet', function(d, cb)
+    local value = d.value
+    if d.here then value = mySpot() end
+    local ok, words = lib.callback.await('dps-studio:portalSet', false, d.id, d.what, value)
+    cb({ ok = ok and true or false, err = not ok and (words or 'Not saved') or nil })
+end)
+
+RegisterNUICallback('portalGo', function(d, cb)
+    local x, y, z = tonumber(d.x), tonumber(d.y), tonumber(d.z)
+    if not (x and y and z) then return cb({ ok = false }) end
+    leave()
+    tpTo(x, y, z, tonumber(d.h) or 0.0)
+    cb({ ok = true })
+end)
+
+RegisterNUICallback('portalWho', function(d, cb)
+    leave()
+    cb({ ok = true })
+    StudioC.OpenManage('portal:' .. tostring(d.id))
+end)
+
+RegisterNUICallback('portalOwner', function(d, cb)
+    leave()
+    cb({ ok = true })
+    CreateThread(function() StudioC.SetOwner('portal:' .. tostring(d.id)) end)
+end)
+
+RegisterNUICallback('roomTool', function(d, cb)
+    local name, tool = d.name, d.tool
+    cb({ ok = true })
+    if type(name) ~= 'string' or not StudioC.rooms[name] then return end
+    leave()
+    CreateThread(function()
+        if tool == 'roomOwner' then StudioC.SetOwner(name)
+        elseif tool == 'roomManage' then StudioC.OpenManage(name)
+        elseif tool == 'roomShell' then StudioC.PlaceShell(name)
+        elseif tool == 'roomExitAdd' then StudioC.RoomExit(name)
+        elseif tool == 'roomExitRemove' then StudioC.RoomExit(name, 'remove') end
+    end)
+end)
