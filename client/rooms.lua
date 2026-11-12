@@ -51,7 +51,7 @@ RegisterCommand('roomlight', function(_, args)
 end, false)
 
 -- Inside a room the world clock and rain are paused for this player only, through the same
--- events the house system uses (dps-weatherbridge turns them into night light, no rain).
+-- events the house system uses (dps-fixes weather bridge turns them into night light, no rain).
 local function setInside(name, on)
     if (inside[name] or false) == on then return end
     inside[name] = on or nil
@@ -69,7 +69,7 @@ local function setInside(name, on)
         end
         return
     end
-    -- a shell is a prop: pause the world clock so the sun never lights it (dps-weatherbridge)
+    -- a shell is a prop: pause the world clock so the sun never lights it (dps-fixes weather bridge)
     TriggerEvent(on and 'qb-weathersync:client:DisableSync' or 'qb-weathersync:client:EnableSync')
 end
 
@@ -121,6 +121,12 @@ function StudioC._despawn(name)
     pieces[name] = nil
 end
 
+---The live shell object of a room, if it is spawned (place the shell hides it while its ghost is moved).
+function StudioC.ShellEntity(name)
+    local sh = shells[name]
+    return type(sh) == 'number' and DoesEntityExist(sh) and sh or nil
+end
+
 ---Spawns a room's shell and pieces if they are not there. Safe to call twice: the
 ---second call waits for the first. Returns true when the shell exists.
 function StudioC.SpawnRoom(name)
@@ -151,14 +157,19 @@ function StudioC._spawnBody(name, r)
             return true
         end
     end
-    local shell = r.data.kind == 'ipl' and 'ipl' or spawn(r.data.shell, r.shellPos)   -- an interior needs no shell
+    local shell = r.data.kind == 'ipl' and 'ipl' or spawn(r.data.shell, r.shellPos, r.at.h)   -- an interior needs no shell
     if shell ~= 'ipl' and stale(shell) then return false end
     if not shell then spawning[name] = nil; return false end
     shells[name] = shell
+    if shell ~= 'ipl' then
+        local mn, mx = GetModelDimensions(GetEntityModel(shell))
+        r.box = { mn, mx }   -- the shell's own size, for "am I inside it" on a hand-placed room
+    end
     local list = {}
     pieces[name] = list
     for _, q in ipairs(r.data.pieces or {}) do
-        local o = spawn(q.model, r.shellPos + vec3(q.x, q.y, q.z), q.h)
+        local w = Studio.ToWorld(r.at, q)
+        local o = spawn(q.model, vec3(w.x, w.y, w.z), w.h)
         if stale(o) then return false end
         if o then
             list[#list + 1] = o
@@ -181,8 +192,18 @@ function StudioC.RoomHere()
             r.int = r.int or GetInteriorAtCoords(r.out.x, r.out.y, r.out.z)
             local mine = GetInteriorFromEntity(cache.ped)
             inRoom = d < 80.0 and ((r.int ~= 0 and mine == r.int) or (r.int == 0 and d < 25.0))
+        elseif r.data.at then
+            -- a hand-placed shell can sit right beside its door: inside means inside the shell's own box
+            local b = r.box
+            if b and d < 200.0 then
+                local l = Studio.ToLocal(r.at, me)
+                inRoom = l.x >= b[1].x - 1.0 and l.x <= b[2].x + 1.0 and l.y >= b[1].y - 1.0 and l.y <= b[2].y + 1.0
+                    and l.z >= b[1].z - 1.0 and l.z <= b[2].z + 2.0
+            end
         else
-            inRoom = d < 120.0 and me.z < r.door.z - Studio.DEPTH / 2
+            -- between the door and the shell, on the shell's side (a room can sit under or above its door)
+            local dep = Studio.RoomDepth(r.data)
+            inRoom = d < 120.0 and ((dep > 0 and me.z < r.door.z - dep / 2) or (dep < 0 and me.z > r.door.z - dep / 2))
         end
         if inRoom and (not bestD or d < bestD) then best, bestD = name, d end
     end
@@ -243,17 +264,24 @@ function StudioC.MoveCar(to, heading, roomName, on)
     return true
 end
 
-local function door(key, coords, text, onUse, dist)
+-- manageOf = the room's name: its owner and managers also see "G Manage" at this door (DPS 2026-11-12)
+local function door(key, coords, text, onUse, dist, manageOf)
     return lib.points.new({
         coords = coords,
         distance = dist or 2.0,   -- a drive-in door is wider, so a car can pull up to it
         onEnter = function()
             prompt = key
             local t = type(text) == 'function' and text() or text
-            nui({ action = 'prompt', key = t:find('^Locked') and '' or 'E', text = t })
+            local locked = t:find('^Locked') ~= nil
+            if manageOf and not locked and StudioC.MayManage and StudioC.MayManage(manageOf) then t = t .. '  ·  G  Manage' end
+            nui({ action = 'prompt', key = locked and '' or 'E', text = t })
         end,
         onExit = function() if prompt == key then prompt = nil; nui({ action = 'prompt' }) end end,
         nearby = function()
+            if manageOf and IsControlJustPressed(0, 47) and not StudioC.busy and not StudioC.moving
+                and StudioC.MayManage and StudioC.MayManage(manageOf) then
+                return StudioC.OpenManage(manageOf)
+            end
             if IsControlJustPressed(0, 38) and not StudioC.busy and not StudioC.moving then
                 local t = type(text) == 'function' and text() or text
                 if t:find('^Locked') then return lib.notify({ type = 'error', description = t:gsub('^Locked · ', '') .. ' is locked' }) end
@@ -280,22 +308,72 @@ local function removeRoom(name)
     return had
 end
 
+---Every door prompt of a room, made from its current data: the door, the way out and any
+---extra door pairs. Called again whenever the words, the lock, the managers or the doors change.
+---The shell and the furniture are not touched, so nobody loses the floor.
+local function buildDoors(name)
+    local r, pts = StudioC.rooms[name], points[name]
+    if not r or not pts then return end
+    for i = #pts, 2, -1 do pts[i]:remove(); pts[i] = nil end
+    if prompt and prompt:find(name .. ':', 1, true) == 1 then prompt = nil; nui({ action = 'prompt' }) end
+    local p = r.data
+    local doorPos, out, shellPos = r.door, r.out, r.shellPos
+    local drive = p.kind == 'ipl' and Studio.InteriorMode(p.ipl) == 'drive'
+    local reach = drive and 6.0 or nil
+    -- on the list: Enter. Not on it but the room has a passcode: E asks for the code. Otherwise locked.
+    local function enterText()
+        if StudioC.MayEnter(p) then return 'Enter ' .. p.label end
+        return (p.access and p.access.code) and ('Enter the code · ' .. p.label) or ('Locked · ' .. p.label)
+    end
+    local function mayPass()
+        if StudioC.MayEnter(p) then return true end
+        if p.access and p.access.code and StudioC.AskCode and StudioC.AskCode('room', name, p.label) then return true end
+        lib.notify({ type = 'error', description = p.label .. ' is locked' })
+        return false
+    end
+    pts[2] = door(name .. ':in', doorPos, enterText, function()
+        if not mayPass() then return end
+        if drive and cache.vehicle then
+            if StudioC.MoveCar(out, r.outH, name, true) == true then setInside(name, true) end
+        elseif StudioC.Move(out, r.outH, name) then setInside(name, true) end
+    end, reach, name)
+    pts[3] = door(name .. ':out', out, 'Leave ' .. p.label, function()
+        if drive and cache.vehicle then
+            if StudioC.MoveCar(doorPos, (p.entrance.h + 180.0) % 360.0, name, false) == true then setInside(name, false) end
+        elseif StudioC.Move(doorPos, (p.entrance.h + 180.0) % 360.0) then setInside(name, false) end
+    end, reach, name)
+    -- DPS 2026-10-19 (Damon): extra door pairs, e.g. the airport ops office's second exit into the terminal.
+    -- p.exits = { { from = offset inside the shell {x,y,z,h}, to = world spot outside {x,y,z,h} }, ... }
+    -- DPS 2026-11-12: staff add them in game with /roomexit; they use the room's own lock.
+    for i, e in ipairs(p.kind ~= 'ipl' and p.exits or {}) do
+        local w = Studio.ToWorld(r.at, e.from)
+        local inPos, world = vec3(w.x, w.y, w.z), vec3(e.to.x, e.to.y, e.to.z)
+        pts[#pts + 1] = door(name .. ':x' .. i .. 'out', inPos, 'Leave ' .. p.label, function() if StudioC.Move(world, e.to.h) then setInside(name, false) end end, nil, name)
+        pts[#pts + 1] = door(name .. ':x' .. i .. 'in', world, enterText, function()
+            if not mayPass() then return end
+            if StudioC.Move(inPos, w.h, name) then setInside(name, true) end
+        end, nil, name)
+    end
+end
+
 local function addRoom(p, respawn)
     local name = p.name
     if type(name) ~= 'string' or (p.kind ~= 'ipl' and type(p.shell) ~= 'string') then return end
     local doorPos = vec3(p.entrance.x, p.entrance.y, p.entrance.z)
-    local shellPos, out
+    local shellPos, out, at, outH
     if p.kind == 'ipl' then
         -- an interior sits where the game put it; its way out is a world spot and the anchor for pieces
         out = vec3(p.exit.x, p.exit.y, p.exit.z)
         shellPos = out
     else
-        shellPos = doorPos - vec3(0.0, 0.0, Studio.DEPTH)
-        out = shellPos + vec3(p.exit.x, p.exit.y, p.exit.z)
+        -- DPS 2026-11-12: the shell sits where staff placed it (/roomshell), or under its door; it may be turned
+        at = Studio.ShellAt(p)
+        shellPos = vec3(at.x, at.y, at.z)
+        local o = Studio.ToWorld(at, p.exit)
+        out, outH = vec3(o.x, o.y, o.z), o.h
     end
-    StudioC.rooms[name] = { data = p, shellPos = shellPos, out = out, door = doorPos }
-    local drive = p.kind == 'ipl' and Studio.InteriorMode(p.ipl) == 'drive'
-    local reach = drive and 6.0 or nil
+    StudioC.rooms[name] = { data = p, shellPos = shellPos, out = out, door = doorPos,
+                            at = at or { x = shellPos.x, y = shellPos.y, z = shellPos.z, h = 0.0 }, outH = outH or p.exit.h }
     points[name] = {
         lib.points.new({
             coords = shellPos,
@@ -304,28 +382,8 @@ local function addRoom(p, respawn)
             onEnter = function() if p.kind ~= 'ipl' then CreateThread(function() StudioC.SpawnRoom(name) end) end end,
             onExit = function() despawn(name) end,
         }),
-        door(name .. ':in', doorPos, function() return StudioC.MayEnter(p) and ('Enter ' .. p.label) or ('Locked · ' .. p.label) end, function()
-            if not StudioC.MayEnter(p) then return lib.notify({ type = 'error', description = p.label .. ' is locked' }) end
-            if drive and cache.vehicle then
-                if StudioC.MoveCar(out, p.exit.h, name, true) == true then setInside(name, true) end
-            elseif StudioC.Move(out, p.exit.h, name) then setInside(name, true) end
-        end, reach),
-        door(name .. ':out', out, 'Leave ' .. p.label, function()
-            if drive and cache.vehicle then
-                if StudioC.MoveCar(doorPos, (p.entrance.h + 180.0) % 360.0, name, false) == true then setInside(name, false) end
-            elseif StudioC.Move(doorPos, (p.entrance.h + 180.0) % 360.0) then setInside(name, false) end
-        end, reach),
     }
-    -- DPS 2026-10-19 (Damon): extra door pairs, e.g. the airport ops office's second exit into the terminal.
-    -- p.exits = { { from = offset inside the shell {x,y,z,h}, to = world spot outside {x,y,z,h} }, ... }
-    for i, e in ipairs(p.kind ~= 'ipl' and p.exits or {}) do
-        local inPos, world, pts = shellPos + vec3(e.from.x, e.from.y, e.from.z), vec3(e.to.x, e.to.y, e.to.z), points[name]
-        pts[#pts + 1] = door(name .. ':x' .. i .. 'out', inPos, 'Leave ' .. p.label, function() if StudioC.Move(world, e.to.h) then setInside(name, false) end end)
-        pts[#pts + 1] = door(name .. ':x' .. i .. 'in', world, function() return StudioC.MayEnter(p) and ('Enter ' .. p.label) or ('Locked · ' .. p.label) end, function()
-            if not StudioC.MayEnter(p) then return lib.notify({ type = 'error', description = p.label .. ' is locked' }) end
-            if StudioC.Move(inPos, e.from.h, name) then setInside(name, true) end
-        end)
-    end
+    buildDoors(name)
     if respawn and (p.kind ~= 'ipl' or inside[name]) then CreateThread(function() StudioC.SpawnRoom(name) end) end   -- redraw at once after an edit
 end
 
@@ -366,7 +424,8 @@ local function updatePieces(name, p)
     local my = gen[name] or 0
     CreateThread(function()
         for _, q in pairs(want) do
-            local o = spawn(q.model, r.shellPos + vec3(q.x, q.y, q.z), q.h)
+            local w = Studio.ToWorld(r.at, q)
+            local o = spawn(q.model, vec3(w.x, w.y, w.z), w.h)
             if (gen[name] or 0) ~= my or pieces[name] ~= keep then
                 if o and DoesEntityExist(o) then DeleteEntity(o) end
                 return
@@ -382,21 +441,21 @@ end
 -- One room changed (p = false when it was removed).
 RegisterNetEvent('dps-studio:room', function(name, p)
     local old = StudioC.rooms[name]
-    if p and old and old.data.shell == p.shell and old.data.ipl == p.ipl and same(old.data.entrance, p.entrance) and same(old.data.exit, p.exit) and shells[name] then
+    if p and old and old.data.shell == p.shell and old.data.ipl == p.ipl and same(old.data.entrance, p.entrance) and same(old.data.exit, p.exit) and shells[name]
+        and old.data.depth == p.depth and json.encode(old.data.at or {}) == json.encode(p.at or {}) then   -- a moved shell is a full rebuild
         if p.kind == 'ipl' and inside[name] then StudioC.IplApply(p.ipl, p.style) end   -- a new style shows at once
-        if old.data.label ~= p.label or json.encode(old.data.access or {}) ~= json.encode(p.access or {}) then
-            -- new door words: swap only the two door prompts, the shell stays under everyone
-            local pts = points[name]
-            for i = 2, 3 do if pts[i] then pts[i]:remove() end end
-            if prompt and prompt:find(name .. ':', 1, true) == 1 then prompt = nil; nui({ action = 'prompt' }) end
-            local r = old
-            pts[2] = door(name .. ':in', r.door, function() return StudioC.MayEnter(p) and ('Enter ' .. p.label) or ('Locked · ' .. p.label) end, function()
-                if not StudioC.MayEnter(p) then return lib.notify({ type = 'error', description = p.label .. ' is locked' }) end
-                if StudioC.Move(r.out, p.exit.h, name) then setInside(name, true) end
-            end)
-            pts[3] = door(name .. ':out', r.out, 'Leave ' .. p.label, function() if StudioC.Move(r.door, (p.entrance.h + 180.0) % 360.0) then setInside(name, false) end end)
+        local function changed(k) return json.encode(old.data[k] or {}) ~= json.encode(p[k] or {}) end
+        if old.data.label ~= p.label or changed('access') or changed('manage') or changed('exits') then
+            -- new door words, lock, managers or extra doors: redo only the prompts, the shell stays under everyone
+            old.data = p
+            buildDoors(name)
         end
         return updatePieces(name, p)
+    end
+    -- the room is about to be taken away and rebuilt (new shell, new door, new depth): anyone standing
+    -- in it goes to its door first, so nobody is left in mid air
+    if old and inside[name] and old.data.kind ~= 'ipl' and StudioC.RoomHere() == name then
+        SetEntityCoords(cache.ped, old.door.x, old.door.y, old.door.z, false, false, false, false)
     end
     local had = removeRoom(name)
     if p then addRoom(p, had) end

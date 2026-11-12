@@ -1,4 +1,4 @@
--- CLIENT (admin). The door maker, in /admin > Doors. ox_doorlock stays the lock engine: doors are
+-- CLIENT (admin). The door maker, in /studio > Doors. ox_doorlock stays the lock engine: doors are
 -- created and removed with ox_doorlock's own admin event (from this admin's game, as its own
 -- window does), and edited on the server with its editDoor export. Picking a door works like
 -- ox_doorlock's: look at it, left click; click the second half of a double door or press Enter.
@@ -40,6 +40,7 @@ function StudioC.PickDoor(title)
         DisablePlayerFiring(cache.playerId, true)
         DisableControlAction(0, 24, true); DisableControlAction(0, 25, true)
         DisableControlAction(0, 191, true); DisableControlAction(0, 194, true); DisableControlAction(0, 177, true); DisableControlAction(0, 200, true)
+        DisableControlAction(0, 199, true); DisableControlAction(0, 322, true)   -- DPS 2026-10-28: Esc never opens the pause menu
         local hit, entity = lib.raycast.cam(1 | 16)
         local first = picked[1] and picked[1].entity
         if last ~= 0 and last ~= entity and last ~= first and DoesEntityExist(last) then SetEntityDrawOutline(last, false) end
@@ -132,6 +133,7 @@ local function me()
     return {
         job = job.name, grade = type(job.grade) == 'table' and job.grade.level or job.grade,
         gang = gang.name, gangGrade = type(gang.grade) == 'table' and gang.grade.level or gang.grade,
+        jobBoss = job.isboss == true, gangBoss = gang.isboss == true,   -- DPS 2026-11-12: room managers follow the boss rank
         citizenid = pd.citizenid, staff = StudioC.isAdmin == true,
         has = function(item)
             local ok, n = pcall(function() return exports.ox_inventory:Search('count', item) end)
@@ -145,5 +147,8 @@ function StudioC.MayEnter(roomData)
     local a = roomData and roomData.access
     if not a or a.open then return true end
     if StudioC.isAdmin then return true end   -- staff can always get in to set things up
-    return Studio.AccessAllows(a, me())
+    return Studio.MayEnterRoom(roomData, me())   -- the list, or one of the room's managers
 end
+
+---This player, as the manage rules see them (job, rank, boss flag, gang, citizen id, staff).
+function StudioC.Me() return me() end

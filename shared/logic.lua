@@ -253,7 +253,8 @@ function Studio.PublicRoom(room)
     local look = Studio.ActiveLook(room)
     return { name = room.name, label = room.label, shell = room.shell, kind = room.kind or 'shell', ipl = room.ipl,
              entrance = room.entrance, exit = room.exit, exits = room.exits, look = look and look.id or nil,
-             access = room.access and Studio.CleanAccess(room.access) or { open = true },
+             access = Studio.PublicAccess(room.access),
+             manage = Studio.CleanManage(room.manage), depth = room.depth, at = room.at,
              style = look and copyStyle(look.style) or nil, pieces = look and copyPieces(look.pieces) or {} }
 end
 
@@ -265,6 +266,7 @@ function Studio.RoomSummary(room)
     return { name = room.name, label = room.label, shell = room.shell, kind = room.kind or 'shell', ipl = room.ipl,
              style = active and copyStyle(active.style) or nil, entrance = room.entrance, exit = room.exit,
              access = room.access and Studio.CleanAccess(room.access) or { open = true }, doors = room.doors or {},
+             manage = Studio.CleanManage(room.manage), exits = room.exits, depth = Studio.RoomDepth(room), at = room.at,
              look = room.look, lookName = active and active.name or '', count = active and #active.pieces or 0,
              max = Studio.MAX_PIECES, looks = looks, updatedBy = room.updatedBy, updatedAt = room.updatedAt }
 end
@@ -354,6 +356,295 @@ function Studio.AccessAllows(a, who)
     for _, c in ipairs(a.characters) do if c == who.citizenid then return true end end
     for _, it in ipairs(a.items) do if who.has and who.has(it) then return true end end
     return false
+end
+
+-- ---------------------------------------------------------------- room managers
+-- DPS 2026-11-12 (Damon): a room is run by its owner, not by staff. The owner is a person or a
+-- group (job or gang). A group owner follows the rank, never the name: whoever holds the boss
+-- rank manages, until the leader lowers the bar or names other people or groups.
+--   manage = { owner = { kind = 'person'|'group', id = citizen id | job or gang name },
+--              grade = lowest rank of the owner group that counts as its leader (nil = boss ranks only),
+--              characters = { citizen ids named as managers }, groups = { [job or gang] = lowest rank } }
+-- Owner side (the owner, or the owner group's leaders) may change who manages.
+-- Managers may change who gets in. Staff may do both and are the only ones who set the owner.
+-- who = { citizenid, job, grade, jobBoss, gang, gangGrade, gangBoss, staff }
+
+local function idOk(s, max) return type(s) == 'string' and s:match('^[%w_%-]+$') ~= nil and #s <= (max or 40) end
+local function rank(v) return math.max(0, math.min(50, math.floor(tonumber(v) or 0))) end
+
+---A checked copy of a room's manage block, or nil when it has no owner (then only staff manage).
+function Studio.CleanManage(m)
+    if type(m) ~= 'table' or type(m.owner) ~= 'table' then return nil end
+    local o = m.owner
+    if (o.kind ~= 'person' and o.kind ~= 'group') or not idOk(o.id) then return nil end
+    local out = { owner = { kind = o.kind, id = o.id }, characters = {}, groups = {} }
+    if o.kind == 'group' and m.grade ~= nil then out.grade = rank(m.grade) end
+    for i, c in ipairs(type(m.characters) == 'table' and m.characters or {}) do
+        if i > 40 then break end
+        if type(c) == 'string' and c:match('^[%w]+$') and #c <= 20 then out.characters[#out.characters + 1] = c end
+    end
+    local n = 0
+    for g, grade in pairs(type(m.groups) == 'table' and m.groups or {}) do
+        n = n + 1
+        if n > 20 then break end
+        if idOk(g) then out.groups[g] = rank(grade) end
+    end
+    return out
+end
+
+---The owner, or a leader of the owner group. Staff count too.
+function Studio.IsOwnerSide(m, who)
+    if type(who) ~= 'table' then return false end
+    if who.staff then return true end
+    m = Studio.CleanManage(m)
+    if not m then return false end
+    local o = m.owner
+    if o.kind == 'person' then return who.citizenid ~= nil and who.citizenid == o.id end
+    for _, side in ipairs({ { who.job, who.grade, who.jobBoss }, { who.gang, who.gangGrade, who.gangBoss } }) do
+        if side[1] == o.id then
+            if side[3] == true then return true end                       -- the boss rank always leads
+            if m.grade and (tonumber(side[2]) or 0) >= m.grade then return true end
+        end
+    end
+    return false
+end
+
+---May this player change who gets into the room?
+function Studio.MayManage(m, who)
+    if Studio.IsOwnerSide(m, who) then return true end
+    m = Studio.CleanManage(m)
+    if not m or type(who) ~= 'table' then return false end
+    for _, c in ipairs(m.characters) do if c == who.citizenid then return true end end
+    for g, grade in pairs(m.groups) do
+        if (who.job == g and (tonumber(who.grade) or 0) >= grade) or (who.gang == g and (tonumber(who.gangGrade) or 0) >= grade) then return true end
+    end
+    return false
+end
+
+local OWNER_OPS = { manager_add = true, manager_remove = true, mgroup_set = true, mgroup_remove = true, leader_grade = true }
+local MANAGE_OPS = { person_add = true, person_remove = true, group_set = true, group_remove = true, passcode = true, open = true,
+                     item_add = true, item_remove = true }
+
+local function has(list, v) for i, x in ipairs(list) do if x == v then return i end end end
+
+---One change made from the door menu. Checks the right, the values and the limits, then edits
+---room.access or room.manage. Works the same on a room and on a portal (a portal is a door).
+---groupSet (optional) = names that are real jobs or gangs; itemSet (optional) = real item names.
+---@return boolean ok, string words (the error, or the history line)
+function Studio.ManageApply(room, who, op, arg, groupSet, itemSet)
+    if type(room) ~= 'table' or type(arg) ~= 'table' then return false, 'Bad request' end
+    if not (OWNER_OPS[op] or MANAGE_OPS[op]) then return false, 'Unknown change' end
+    local m = Studio.CleanManage(room.manage)
+    if OWNER_OPS[op] then
+        if not m then return false, 'This room has no owner yet. Staff set the owner first.' end
+        if not Studio.IsOwnerSide(m, who) then return false, 'Only the owner or its leaders can change who manages' end
+    elseif not Studio.MayManage(m, who) then
+        return false, 'You do not manage this room'
+    end
+    local a = Studio.CleanAccess(room.access)
+    local label = room.label or room.name or 'room'
+    local function group()
+        if not idOk(arg.group) then return nil, 'Pick a job or gang' end
+        if groupSet and not groupSet[arg.group] then return nil, 'That job or gang does not exist' end
+        return arg.group
+    end
+    local function person()
+        if type(arg.cid) ~= 'string' or not arg.cid:match('^[%w]+$') or #arg.cid > 20 then return nil, 'Pick a person' end
+        return arg.cid
+    end
+    local words
+
+    if op == 'person_add' then
+        local c, e = person(); if not c then return false, e end
+        if has(a.characters, c) then return false, 'That person is already on the list' end
+        if #a.characters >= 40 then return false, 'The list is full (40 people)' end
+        a.characters[#a.characters + 1] = c
+        words = ('%s: person added to access'):format(label)
+    elseif op == 'person_remove' then
+        local c, e = person(); if not c then return false, e end
+        local i = has(a.characters, c); if not i then return false, 'That person is not on the list' end
+        table.remove(a.characters, i)
+        words = ('%s: person removed from access'):format(label)
+    elseif op == 'group_set' then
+        local g, e = group(); if not g then return false, e end
+        local n = 0; for _ in pairs(a.groups) do n = n + 1 end
+        if not a.groups[g] and n >= 40 then return false, 'The list is full (40 groups)' end
+        a.groups[g] = rank(arg.grade)
+        words = ('%s: %s rank %d and up may enter'):format(label, g, a.groups[g])
+    elseif op == 'group_remove' then
+        local g, e = group(); if not g then return false, e end
+        if a.groups[g] == nil then return false, 'That group is not on the list' end
+        a.groups[g] = nil
+        words = ('%s: %s removed from access'):format(label, g)
+    elseif op == 'item_add' or op == 'item_remove' then
+        local it = arg.item
+        if type(it) ~= 'string' or not it:match('^[%w_%-]+$') or #it > 60 then return false, 'Pick a key item' end
+        local i = has(a.items, it)
+        if op == 'item_add' then
+            if itemSet and not itemSet[it] then return false, 'That item does not exist' end
+            if i then return false, 'That item is already a key' end
+            if #a.items >= 20 then return false, 'The list is full (20 key items)' end
+            a.items[#a.items + 1] = it
+            words = ('%s: %s is now a key'):format(label, it)
+        else
+            if not i then return false, 'That item is not a key here' end
+            table.remove(a.items, i)
+            words = ('%s: %s is no longer a key'):format(label, it)
+        end
+    elseif op == 'passcode' then
+        if arg.code == nil or arg.code == '' then
+            a.passcode = nil
+            words = ('%s: passcode cleared'):format(label)
+        else
+            if type(arg.code) ~= 'string' or not arg.code:match('^[%w]+$') or #arg.code > 12 then return false, 'A passcode is 1 to 12 letters or numbers' end
+            a.passcode = arg.code
+            words = ('%s: passcode changed'):format(label)
+        end
+    elseif op == 'open' then
+        a.open = arg.on == true
+        words = ('%s: %s'):format(label, a.open and 'open to everyone' or 'locked to its list')
+    elseif op == 'manager_add' then
+        local c, e = person(); if not c then return false, e end
+        if has(m.characters, c) then return false, 'That person already manages this room' end
+        if #m.characters >= 40 then return false, 'The list is full (40 managers)' end
+        m.characters[#m.characters + 1] = c
+        words = ('%s: manager added'):format(label)
+    elseif op == 'manager_remove' then
+        local c, e = person(); if not c then return false, e end
+        local i = has(m.characters, c); if not i then return false, 'That person is not a manager' end
+        table.remove(m.characters, i)
+        words = ('%s: manager removed'):format(label)
+    elseif op == 'mgroup_set' then
+        local g, e = group(); if not g then return false, e end
+        local n = 0; for _ in pairs(m.groups) do n = n + 1 end
+        if not m.groups[g] and n >= 20 then return false, 'The list is full (20 groups)' end
+        m.groups[g] = rank(arg.grade)
+        words = ('%s: %s rank %d and up may manage'):format(label, g, m.groups[g])
+    elseif op == 'mgroup_remove' then
+        local g, e = group(); if not g then return false, e end
+        if m.groups[g] == nil then return false, 'That group does not manage this room' end
+        m.groups[g] = nil
+        words = ('%s: %s no longer manages'):format(label, g)
+    elseif op == 'leader_grade' then
+        if m.owner.kind ~= 'group' then return false, 'Only a group owner has ranks' end
+        if arg.grade == nil then
+            m.grade = nil
+            words = ('%s: only the boss rank of %s leads'):format(label, m.owner.id)
+        else
+            m.grade = rank(arg.grade)
+            words = ('%s: %s rank %d and up lead'):format(label, m.owner.id, m.grade)
+        end
+    end
+
+    room.access = a
+    if m then room.manage = m end
+    return true, words
+end
+
+---May this player walk through the room's doors? Its managers always may (nobody locks the owner out).
+function Studio.MayEnterRoom(room, who)
+    if type(room) ~= 'table' then return false end
+    local a = room.access
+    if not a or a.open then return true end
+    if Studio.AccessAllows(a, who) then return true end
+    return Studio.MayManage(room.manage, who)
+end
+
+---How far under its door a shell room sits. Most rooms use Studio.DEPTH. A room on a tall roof
+---needs another value, or its shell lands inside the building below (DPS 2026-11-12, Cayo Corp).
+---Positive = under the door, negative = above it. 20 to 1500 m either way.
+function Studio.RoomDepth(room)
+    local d = type(room) == 'table' and tonumber(room.depth)
+    if d and d == d and math.abs(d) >= 20 and math.abs(d) <= 1500 then return d + 0.0 end
+    return Studio.DEPTH
+end
+
+---Where a shell room's shell sits and which way it faces: { x, y, z, h }, in the world.
+---room.at when staff placed it by hand (/roomshell), else straight under (or above) its door, unturned.
+function Studio.ShellAt(room)
+    local e, a = room.entrance, room.at
+    if type(a) == 'table' and Studio.ValidSpot(a) and math.abs(a.x - e.x) <= 1500 and math.abs(a.y - e.y) <= 1500 and math.abs(a.z - e.z) <= 1500 then
+        return { x = a.x + 0.0, y = a.y + 0.0, z = a.z + 0.0, h = a.h % 360.0 }
+    end
+    return { x = e.x + 0.0, y = e.y + 0.0, z = e.z - Studio.RoomDepth(room), h = 0.0 }
+end
+
+---A spot saved inside a shell (an offset: the way out, a piece, an extra door) to its place in the
+---world. A turned shell turns everything in it. With h = 0 this is the plain sum it always was.
+function Studio.ToWorld(at, off)
+    local r = math.rad(at.h or 0.0)
+    local c, sn = math.cos(r), math.sin(r)
+    return { x = at.x + off.x * c - off.y * sn, y = at.y + off.x * sn + off.y * c, z = at.z + off.z,
+             h = ((off.h or 0.0) + (at.h or 0.0)) % 360.0 }
+end
+
+---The other way: a spot in the world to its offset inside the shell.
+function Studio.ToLocal(at, w)
+    local r = math.rad(at.h or 0.0)
+    local c, sn = math.cos(r), math.sin(r)
+    local dx, dy = w.x - at.x, w.y - at.y
+    return { x = dx * c + dy * sn, y = -dx * sn + dy * c, z = w.z - at.z,
+             h = ((w.h or 0.0) - (at.h or 0.0)) % 360.0 }
+end
+
+---Extra door pairs of a shell room: from = spot inside the shell (offset), to = spot in the world.
+function Studio.CleanExits(list)
+    local out = {}
+    for i, e in ipairs(type(list) == 'table' and list or {}) do
+        if #out >= 4 then break end
+        if type(e) == 'table' and Studio.ValidOffset(e.from) and Studio.ValidSpot(e.to) then
+            out[#out + 1] = { from = { x = e.from.x, y = e.from.y, z = e.from.z, h = e.from.h },
+                              to = { x = e.to.x, y = e.to.y, z = e.to.z, h = e.to.h },
+                              label = type(e.label) == 'string' and Studio.CleanLabel(e.label) or nil }
+        end
+    end
+    return #out > 0 and out or nil
+end
+
+---The access every player's game is told about. The passcode itself never leaves the server:
+---players only learn that there is one (code = true), and the server checks what they type.
+function Studio.PublicAccess(a)
+    if not a then return { open = true } end
+    local out = Studio.CleanAccess(a)
+    out.code = out.passcode ~= nil or nil
+    out.passcode = nil
+    return out
+end
+
+---Does this typed code open it? (server side)
+function Studio.CodeOpens(a, code)
+    a = Studio.CleanAccess(a)
+    return a.passcode ~= nil and type(code) == 'string' and code == a.passcode
+end
+
+-- ---------------------------------------------------------------- portals
+-- DPS 2026-11-12 (Damon): a portal joins two places. Staff make one side where they stand, go
+-- wherever the other side is by any means, and add it later from the panel. A portal with one
+-- side is saved but shows nothing to players until it has both.
+--   portal = { id, label, a = spot, b = spot|nil, car = bool, wordsA, wordsB, access, manage }
+
+---A checked copy of a portal as stored, or nil.
+function Studio.CleanPortal(p)
+    if type(p) ~= 'table' then return nil end
+    local label = Studio.CleanLabel(p.label)
+    if not label or not Studio.ValidSpot(p.a) then return nil end
+    local function spot(s) return { x = s.x + 0.0, y = s.y + 0.0, z = s.z + 0.0, h = s.h % 360.0 } end
+    local out = { id = tonumber(p.id), label = label, a = spot(p.a), car = p.car == true }
+    if Studio.ValidSpot(p.b) then out.b = spot(p.b) end
+    out.wordsA = type(p.wordsA) == 'string' and Studio.CleanLabel(p.wordsA) or nil
+    out.wordsB = type(p.wordsB) == 'string' and Studio.CleanLabel(p.wordsB) or nil
+    out.access = p.access and Studio.CleanAccess(p.access) or { open = true, staff = false, groups = {}, items = {}, characters = {} }
+    out.manage = Studio.CleanManage(p.manage)
+    return out
+end
+
+---What every player's game needs to run a portal. nil while it has only one side.
+function Studio.PublicPortal(p)
+    p = Studio.CleanPortal(p)
+    if not p or not p.b then return nil end
+    return { id = p.id, label = p.label, a = p.a, b = p.b, car = p.car,
+             wordsA = p.wordsA or ('Enter ' .. p.label), wordsB = p.wordsB or ('Leave ' .. p.label),
+             access = Studio.PublicAccess(p.access), manage = p.manage }
 end
 
 ---Deep copy through plain tables (rooms hold only strings, numbers, booleans and tables).

@@ -8,7 +8,7 @@
 
 StudioC = StudioC or {}
 
-local BOB = 'bob74_ipl'
+local BOB = 'bob74_ipl'   -- DPS 2026-11-12: was 'nopixel-misc' (NoPixel's loader, gone since 8 Nov), so the interior list came up empty
 local SKIP = { Set = true, Clear = true, Enable = true, Disable = true, Load = true, Remove = true, Refresh = true,
                Color = true, Colors = true, Colour = true, LoadDefault = true, Ipl = true, interiorId = true,
                currentInteriorId = true, Tint = true }

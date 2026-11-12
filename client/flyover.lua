@@ -43,6 +43,7 @@ RegisterNetEvent('dps-studio:flyover', function(targets)
         while running do
             HideHudAndRadarThisFrame()
             DisableControlAction(0, 194, true); DisableControlAction(0, 177, true); DisableControlAction(0, 200, true)
+            DisableControlAction(0, 199, true); DisableControlAction(0, 322, true)   -- DPS 2026-10-28: Esc never opens the pause menu
             if IsDisabledControlJustPressed(0, 194) or IsDisabledControlJustPressed(0, 177) or IsDisabledControlJustPressed(0, 200) then stopAsked = true end
             Wait(0)
         end

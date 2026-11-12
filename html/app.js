@@ -9,19 +9,20 @@
   const app = $('#app'), bar = $('#bar'), list = $('#list'), q = $('#q'), hint = $('#hint'), head = $('#head'),
         chips = $('#chips'), banner = $('#banner'), modal = $('#modal'), stage = $('#stage');
 
-  const TABS = ['rooms', 'place', 'shells', 'inspect', 'spots', 'doors', 'history'];
+  const TABS = ['rooms', 'place', 'shells', 'inspect', 'spots', 'doors', 'portals', 'history'];   // DPS 2026-11-12: Portals tab
   const HINTS = {
-    rooms: '<kbd>↑↓</kbd> move &nbsp;<kbd>Enter</kbd> open &nbsp;<kbd>N</kbd> new room at my spot &nbsp;<kbd>1-7</kbd> tabs &nbsp;<kbd>Tab</kbd> buttons &nbsp;<kbd>Esc</kbd> close',
+    rooms: '<kbd>↑↓</kbd> move &nbsp;<kbd>Enter</kbd> open &nbsp;<kbd>N</kbd> new room at my spot &nbsp;<kbd>1-8</kbd> tabs &nbsp;<kbd>Tab</kbd> buttons &nbsp;<kbd>Esc</kbd> close',
     place: '<kbd>↑↓</kbd> move &nbsp;<kbd>Enter</kbd> place or move &nbsp;<kbd>M</kbd> pieces in this room &nbsp;<kbd>Delete</kbd> remove · type to search',
     shells: '<kbd>↑↓</kbd> next shell &nbsp;<kbd>← →</kbd> or drag to turn &nbsp;<kbd>Page Up / Down</kbd> tilt &nbsp;wheel zoom &nbsp;<kbd>Enter</kbd> walk inside',
     inspect: 'Hold <kbd>Middle mouse</kbd> anywhere to inspect. The last 30 are kept here.',
     spots: '<kbd>Page Up</kbd> marks a spot &nbsp;<kbd>F3</kbd> captures coords &nbsp;<kbd>Enter</kbd> open · type to search',
-    doors: '<kbd>↑↓</kbd> move &nbsp;<kbd>Enter</kbd> open or save &nbsp;<kbd>1-7</kbd> tabs · type to search',
+    doors: '<kbd>↑↓</kbd> move &nbsp;<kbd>Enter</kbd> open or save &nbsp;<kbd>1-8</kbd> tabs · type to search',
+    portals: 'A portal joins two places. Make one side, go to the other place, then add the other side here.',
     history: '<kbd>↑↓</kbd> move &nbsp;<kbd>Enter</kbd> open · every change can be put back',
   };
-  const PH = { rooms: 'Search rooms…', place: 'Search furniture…', shells: 'Search shells: warehouse, office, garage…', inspect: 'Search scans…', spots: 'Search spots…', doors: 'Search doors: name, job, room…', history: 'Search history…' };
+  const PH = { rooms: 'Search rooms…', place: 'Search furniture…', shells: 'Search shells: warehouse, office, garage…', inspect: 'Search scans…', spots: 'Search spots…', doors: 'Search doors: name, job, room…', portals: 'Search portals…', history: 'Search history…' };
 
-  const S = { tab: 'rooms', boot: null, rooms: [], spots: [], hist: [], scans: [], here: null, pick: null,
+  const S = { tab: 'rooms', boot: null, rooms: [], spots: [], portals: [], hist: [], scans: [], here: null, pick: null,
               items: [], sel: -1, open: false, chip: { place: 'all', lib: 'lighting', shells: 'all', spots: 'all' }, q: {}, shellTimer: null, shown: false, pv: null,
               src: 'decorate', lib: null, bad: new Set(), more: 0, pieces: [], thumbs: {}, hidden: {}, showHidden: false,
               shellSrc: 'shells', ipls: null, iplStyle: {}, styling: null, doors: [], pickers: null, acc: {} };
@@ -140,6 +141,7 @@
         return S.boot.shells.filter((m) => (S.chip.shells === 'all' || (meta[m] && meta[m].use === S.chip.shells)) && match(shellWords(m))).map((m) => ({ model: m, meta: meta[m] }));
       }
       case 'inspect': return S.scans.filter((s) => match(`${s.name} ${s.kind} ${s.note || ''}`));
+      case 'portals': return S.portals.filter((p) => match(`${p.label} ${p.id} ${p.b ? 'live' : 'needs other side'}`));
       case 'spots': return S.spots.filter((s) => (S.chip.spots === 'all' || s.kind === S.chip.spots) && match(`${s.id} ${s.label} ${s.street} ${s.zone} ${s.by_name} ${s.kind}`));
       case 'history': return S.hist.filter((h) => match(`${h.summary} ${h.room} ${h.by_name} ${h.action}`));
       case 'doors': return S.doors.filter((d) => match(`${d.name} ${d.id} ${d.room || ''} ${accessSummary(d.access)}`)).map((d) => Object.assign({ door: true }, d));
@@ -191,6 +193,12 @@
       thumb = `<i class="fa-solid ${Number(it.state) === 1 ? 'fa-lock' : 'fa-lock-open'}"></i>`;
       nm = esc(it.name); mt = `#${it.id}${it.double ? ' · double' : ''} · ${esc(accessSummary(it.access))}${it.room ? ' · room ' + esc(it.room) : ''}`;
       rt = `<span class="badge${Number(it.state) === 1 ? ' on' : ''}">${Number(it.state) === 1 ? 'Locked' : 'Open'}</span>`;
+    } else if (tab === 'portals') {
+      const ready = !!it.b, own = it.manage && it.manage.owner;
+      thumb = `<i class="fa-solid ${ready ? 'fa-door-open' : 'fa-door-closed'}"></i>`;
+      nm = esc(it.label);
+      mt = `${ready ? 'Both sides set' : 'One side set'} · ${esc(accessSummary(it.access))}${own ? ' · owner ' + esc(own.id) : ''}${it.car ? ' · cars allowed' : ''}`;
+      rt = `<span class="badge${ready ? ' on' : ''}">${ready ? 'Live' : 'Needs its other side'}</span>`;
     } else if (tab === 'history') {
       thumb = '<i class="fa-solid fa-clock-rotate-left"></i>';
       nm = esc(it.summary); mt = `${esc(it.at)} · ${esc(it.by_name || '')} · <code>${esc(it.room)}</code>`;
@@ -214,6 +222,10 @@
         <span class="lbl">Door and ${it.kind === 'ipl' ? 'interior' : 'shell'}</span>
         <div class="acts"><button data-a="door">Move the door to me</button><button data-a="redo">Change ${it.kind === 'ipl' ? 'interior' : 'shell'} or way out</button><button data-a="copy">Copy room to my spot</button></div>
         ${it.kind === 'ipl' ? `<p>Interior: <b>${esc(iplLabel(it.ipl))}</b> · style: ${esc(PRESET[(it.style || {}).preset] || PRESET.default)}</p><div class="acts"><button data-a="restyle">Change style</button></div>` : ''}
+        ${it.kind === 'ipl' ? '' : `<div class="acts"><button data-a="roomShell">See and move the shell</button><button data-a="roomExitAdd">Add another door</button>${(it.exits || []).length ? `<button data-a="roomExitRemove">Remove an extra door (${it.exits.length})</button>` : ''}</div>`}
+        <span class="lbl">Owner · runs the room without staff</span>
+        <p>Owner: <b>${esc(it.manage && it.manage.owner ? it.manage.owner.id : 'nobody yet')}</b>. The owner and the managers they name change who gets in from the door itself (G).</p>
+        <div class="acts"><button data-a="roomOwner">Set the owner</button><button data-a="roomManage">Owner's door menu</button></div>
         <div class="acts"><button class="bad" data-a="delete">Remove room</button></div>
         ${(() => { const key = 'room:' + it.name; if (!S.acc[key]) S.acc[key] = accCopy(it.access); return accessHtml(key, false); })()}
         <div class="acts"><button data-a="roomAccessSave">Save who can go in${(it.doors || []).length ? ' (and its ' + it.doors.length + ' doors)' : ''}</button></div>
@@ -253,6 +265,23 @@
     if (tab === 'inspect') {
       const v4 = `vector4(${f2(it.x)}, ${f2(it.y)}, ${f2(it.z)}, ${Number(it.h || 0).toFixed(1)})`;
       return `<div class="det"><p><code>${esc(v4)}</code></p><div class="acts"><button class="pri" data-a="copyName">Copy name</button><button data-a="copyV4" data-v="${esc(v4)}">Copy vector4</button><button data-a="copyHash">Copy hash</button></div></div>`;
+    }
+    if (tab === 'portals') {
+      const ready = !!it.b, own = it.manage && it.manage.owner;
+      const at = (p) => `${f2(p.x)}, ${f2(p.y)}, ${f2(p.z)}`;
+      return `<div class="det">
+        ${ready ? '' : '<p><b>This portal has one side.</b> Go to the other place, by any means, then press the button below.</p><div class="acts"><button class="pri" data-a="portalB">Add the other side where I stand <kbd>Enter</kbd></button></div>'}
+        <span class="lbl">Sides</span>
+        <p>First side: <code>${esc(at(it.a))}</code>${ready ? ` · Second side: <code>${esc(at(it.b))}</code>` : ''}</p>
+        <div class="acts"><button data-a="portalGoA">Go to the first side</button>${ready ? '<button data-a="portalGoB">Go to the second side</button>' : ''}</div>
+        <div class="acts"><button data-a="portalA">Move the first side to me</button>${ready ? '<button data-a="portalB">Move the second side to me</button>' : ''}</div>
+        <span class="lbl">Words and cars</span>
+        <p>Players read <b>${esc(it.wordsA || 'Enter ' + it.label)}</b> at the first side and <b>${esc(it.wordsB || 'Leave ' + it.label)}</b> at the second.</p>
+        <div class="acts"><button data-a="portalRename">Rename</button><button data-a="portalWords">Change the words</button><button data-a="portalCar">${it.car ? 'Cars: allowed' : 'Cars: on foot only'}</button></div>
+        <span class="lbl">Who may use it · the same lock as a room door</span>
+        <p>${esc(accessSummary(it.access))} · owner: <b>${esc(own ? own.id : 'nobody yet')}</b></p>
+        <div class="acts"><button data-a="portalWho">Who may use it, and who manages</button><button data-a="portalOwner">Set the owner</button></div>
+        <div class="acts"><button class="bad" data-a="portalRemove">Remove portal</button></div></div>`;
     }
     if (tab === 'spots') {
       const v3 = `vec3(${f2(it.x)}, ${f2(it.y)}, ${f2(it.z)})`, v4 = `vector4(${f2(it.x)}, ${f2(it.y)}, ${f2(it.z)}, ${Number(it.h || 0).toFixed(1)})`;
@@ -301,6 +330,7 @@
     } else if (t === 'shells') h = S.shellSrc === 'ipls'
       ? `<span class="grow">${(S.ipls || []).filter((e) => (e.mode || 'walk') === 'walk').length} walk-in and ${(S.ipls || []).filter((e) => e.mode === 'drive').length} drive-in game interiors, closed ones only. Each serves one room.</span>`
       : `<span class="grow">${S.boot ? S.boot.shells.length : 0} shells from the housing list. The one you pick floats in the sky so open shells show from every side.</span>`;
+    else if (t === 'portals') { const w = S.portals.filter((p) => !p.b).length; h = `<span class="grow">${S.portals.length} portals${w ? ', ' + w + ' waiting for the other side' : ''}.</span><button class="btn pri" data-a="portalNew">New portal: one side at my spot</button>`; }
     else if (t === 'spots') h = `<span class="grow">${S.spots.length} spots, newest first.</span><button class="btn pri" data-a="markSpot">Mark my spot</button>`;
     else if (t === 'doors') h = `<span class="grow">${S.doors.length} doors in the city's lock system.</span><button class="btn pri" data-a="doorNew">New door</button>`;
     else if (t === 'inspect') h = `<span class="grow">Hold middle mouse and aim. Close this panel first so you can look around.</span>`;
@@ -355,6 +385,7 @@
     if (q.value) return `<b>No match for “${esc(q.value)}”.</b>`;
     if (t === 'rooms') return '<b>No rooms yet.</b><span>Stand where the door should be, then press New room at my spot.</span>';
     if (t === 'inspect') return '<b>Nothing inspected yet.</b><span>Close the panel, hold middle mouse and aim at a prop, car or person.</span>';
+    if (t === 'portals') return '<b>No portals yet.</b><span>Stand where one side should be, then press New portal.</span>';
     if (t === 'spots') return '<b>No spots yet.</b><span>Press Page Up anywhere to mark one.</span>';
     if (t === 'history') return '<b>No changes yet.</b>';
     return 'Nothing to show.';
@@ -395,6 +426,7 @@
       return post('rooms').then((r) => { S.rooms = Array.isArray(r) ? r : []; if (S.tab === t) render(true); });
     }
     if (t === 'doors') return Promise.all([loadPickers(), post('doorsList')]).then(([, r]) => { S.doors = Array.isArray(r) ? r : []; if (S.tab === t) render(true); });
+    if (t === 'portals') return post('portalList').then((r) => { S.portals = Array.isArray(r) ? r : []; if (S.tab === t) render(true); });
     if (t === 'spots') return post('spots').then((r) => { S.spots = Array.isArray(r) ? r : []; if (S.tab === t) render(true); });
     if (t === 'history') return post('history').then((r) => { S.hist = Array.isArray(r) ? r : []; if (S.tab === t) render(true); });
     if (t === 'inspect') return post('scans').then((r) => { S.scans = Array.isArray(r) ? r : []; if (S.tab === t) render(true); });
@@ -756,6 +788,43 @@
       case 'copyHash': if (it && it.hash) copy(String(it.hash)); return;
       case 'copyV3': case 'copyV4': copy(el.dataset.v); return;
       case 'spotGo': if (it) post('spotGo', { x: it.x, y: it.y, z: it.z, h: it.h }); return;
+      /* ---- portals (DPS 2026-11-12): buttons, not commands ---- */
+      case 'portalNew': {
+        const v = await ask('New portal', 'This saves ONE side, where you stand now, facing the way people should face when they arrive here. Then go to the other place by any means and add the other side from this tab.', [{ label: 'Name players read', ph: 'Cayo lift', max: 40 }], 'Save this side');
+        if (!v) return;
+        post('portalNew', { label: v[0] }).then((r) => { if (result(r, 'One side saved. Go to the other place, then come back to this tab.')) load('portals'); }); return;
+      }
+      case 'portalB': case 'portalA': {
+        if (!it) return;
+        const which = a === 'portalA' ? 'a' : 'b';
+        if (it[which] && !await confirmBox('Move this side', `The ${which === 'a' ? 'first' : 'second'} side of ${it.label} moves to where you stand now, facing your way.`, 'Move it')) return;
+        post('portalSet', { id: it.id, what: which, here: true }).then((r) => { if (result(r, it[which] ? 'Side moved' : it.label + ' is live. Walk up to it and press E.')) load('portals'); }); return;
+      }
+      case 'portalGoA': if (it) post('portalGo', it.a); return;
+      case 'portalGoB': if (it && it.b) post('portalGo', it.b); return;
+      case 'portalRename': {
+        if (!it) return;
+        const v = await ask('Rename portal', '', [{ label: 'Name players read', value: it.label, max: 40 }], 'Rename'); if (!v) return;
+        post('portalSet', { id: it.id, what: 'label', value: v[0] }).then((r) => { if (result(r, 'Renamed')) load('portals'); }); return;
+      }
+      case 'portalWords': {
+        if (!it) return;
+        const v = await ask('Words on the prompts', 'Leave one empty to use Enter / Leave with the portal name.', [
+          { label: 'At the first side', value: it.wordsA || '', ph: 'Enter ' + it.label, max: 40, required: false },
+          { label: 'At the second side', value: it.wordsB || '', ph: 'Leave ' + it.label, max: 40, required: false }], 'Save');
+        if (!v) return;
+        post('portalSet', { id: it.id, what: 'wordsA', value: v[0] }).then(() => post('portalSet', { id: it.id, what: 'wordsB', value: v[1] })).then((r) => { if (result(r, 'Words saved')) load('portals'); }); return;
+      }
+      case 'portalCar': if (it) post('portalSet', { id: it.id, what: 'car', value: !it.car }).then((r) => { if (result(r, it.car ? 'On foot only' : 'Cars allowed')) load('portals'); }); return;
+      case 'portalWho': if (it) post('portalWho', { id: it.id }); return;
+      case 'portalOwner': if (it) post('portalOwner', { id: it.id }); return;
+      case 'portalRemove': {
+        if (!it || !await confirmBox('Remove portal', `${it.label} goes, both sides. It stays in History.`, 'Remove')) return;
+        post('portalSet', { id: it.id, what: 'delete' }).then((r) => { if (result(r, 'Removed')) load('portals'); }); return;
+      }
+      /* ---- room tools as buttons (owner, managers, shell, extra doors) ---- */
+      case 'roomOwner': case 'roomManage': case 'roomShell': case 'roomExitAdd': case 'roomExitRemove':
+        if (it) post('roomTool', { name: it.name, tool: a }); return;
       case 'markSpot': {
         const v = await ask('Mark my spot', 'Saves where you stand now.', [{ label: 'Words (optional)', max: 80, required: false }], 'Mark'); if (!v) return;
         post('spotMark', { label: v[0] }).then(() => setTimeout(() => load('spots'), 400)); return;
@@ -793,6 +862,7 @@
   function leave() { closeModal(); if (S.pick) post('pickCancel'); clearTimeout(S.shellTimer); S.pv = null; S.pick = null; S.styling = null; S.open = false; post('close'); }
   $('#close').addEventListener('click', leave);
   $('#fleet').addEventListener('click', () => post('fleet'));
+  $('#portals').addEventListener('click', () => setTab('portals'));   // DPS 2026-11-12: the door button jumps to the Portals tab
   let qt = null; q.addEventListener('input', () => { clearTimeout(qt); qt = setTimeout(() => { qt = null; render(false); }, 90); });
   q.addEventListener('focus', () => bar.classList.add('focus'));
   q.addEventListener('blur', () => bar.classList.remove('focus'));
@@ -802,6 +872,7 @@
     if (t === 'rooms') return act('decorate');
     if (t === 'place') return act(S.src === 'pieces' ? 'pieceMove' : 'place');
     if (t === 'shells') return act(S.items[S.sel] && S.items[S.sel].ipl ? 'iplGo' : 'walk');
+    if (t === 'portals') { const it = S.items[S.sel]; if (it && !it.b) return act('portalB'); return; }
     if (t === 'spots') { const it = S.items[S.sel]; if (it) copy(`vector4(${f2(it.x)}, ${f2(it.y)}, ${f2(it.z)}, ${Number(it.h || 0).toFixed(1)})`); return; }
     if (t === 'history') return select(S.sel, true);
     if (t === 'inspect') return act('copyName');
@@ -832,7 +903,7 @@
     if (e.key === 'Enter') { e.preventDefault(); if (qt) { clearTimeout(qt); qt = null; render(false); } if (S.tab === 'rooms' && !S.open) select(S.sel, true); else primary(); return; }
     if (e.key === 'Tab') return;   // Tab walks through the buttons as normal
     if (typing) return;
-    if (/^[1-7]$/.test(e.key)) { e.preventDefault(); setTab(TABS[Number(e.key) - 1]); return; }
+    if (/^[1-8]$/.test(e.key)) { e.preventDefault(); setTab(TABS[Number(e.key) - 1]); return; }
     const k = e.key.toLowerCase();
     if (S.tab === 'shells') {
       if (k === 'arrowleft') { e.preventDefault(); return post('cam', { turn: -8 }); }
@@ -908,7 +979,7 @@
     return `<h5>INSPECT</h5><div class="big">${esc(d.name)}</div><dl>
       ${d.where ? `<dt>You</dt><dd>${esc(d.where)}</dd>` : ''}
       ${d.kind ? `<dt>Kind</dt><dd>${esc(d.kind)}</dd>` : ''}${d.hash ? `<dt>Hash</dt><dd>${esc(d.hash)}</dd>` : ''}${v4 ? `<dt>Spot</dt><dd>${esc(v4)}</dd>` : ''}</dl>
-      ${d.note ? `<p>${esc(d.note)}</p>` : ''}<p>Open /admin, Inspect tab, to copy it.</p>`;
+      ${d.note ? `<p>${esc(d.note)}</p>` : ''}<p>Open /studio, Inspect tab, to copy it.</p>`;
   }
 
   /* ---------- messages from the game ---------- */
@@ -961,7 +1032,7 @@
         if (m.card) showCard(inspectCard(m.card));
         else if (m.linger) { clearTimeout(cardT); cardT = setTimeout(() => showCard(null), m.linger); }
         break;
-      case 'pos': showCard(`<h5>F3 COORDS · #${esc(m.id)}</h5><div class="big">${esc(m.text)}</div>${m.where ? `<dl><dt>You</dt><dd>${esc(m.where)}</dd></dl>` : ''}<p>Saved. Open /admin, Spots tab, to copy it.</p>`, 12000); break;
+      case 'pos': showCard(`<h5>F3 COORDS · #${esc(m.id)}</h5><div class="big">${esc(m.text)}</div>${m.where ? `<dl><dt>You</dt><dd>${esc(m.where)}</dd></dl>` : ''}<p>Saved. Open /studio, Spots tab, to copy it.</p>`, 12000); break;
       case 'changed':
         if (m.here !== undefined) S.here = m.here || null;
         if (S.shown && (!m.what || m.what === S.tab)) load();
