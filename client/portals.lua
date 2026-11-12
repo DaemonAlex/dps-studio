@@ -229,32 +229,58 @@ RegisterCommand('portals', function()
 end, false)
 
 ---/portal: one side of a new portal here, or finish one that is waiting for its other side.
+---/portal <name> makes one straight away with that name, with no box to fill in.
+---Every path says something on screen, so it is never silent (DPS 2026-11-12: "/portal did nothing I could see").
+-- Each step tells the server log where it got to, and any error on this side is sent there too
+-- (errors in a player's game never reach the server log by themselves).
+local function trace(words) TriggerServerEvent('dps-studio:trace', tostring(words):sub(1, 300)) end
+
 RegisterCommand('portal', function(_, args)
-    if not isStaff() then return note('error', 'Staff only') end
+    trace('/portal typed: ' .. table.concat(args or {}, ' '))
+    if not isStaff() then return note('error', 'Portals are made by staff') end
+    local spot = here()   -- where you stood when you typed it, not where you wander while naming it
+    local typed = table.concat(args or {}, ' ')
+    typed = typed:gsub('^%s+', '')
+    typed = typed:gsub('%s+$', '')
+    trace('/portal passed the staff check, name "' .. typed .. '"')
     CreateThread(function()
-        local forceNew = args[1] and args[1]:lower() == 'new'
-        if not forceNew then
+      local okRun, errRun = xpcall(function()
+        local forceNew = typed:lower() == 'new'
+        if forceNew then typed = '' end
+        if typed == '' and not forceNew then
             local info = lib.callback.await('dps-studio:portalList', false)
+            if not info then return note('error', 'The portal list did not answer. Try again in a moment.') end
             local waiting = {}
-            for _, p in ipairs(info and info.list or {}) do if not p.b then waiting[#waiting + 1] = p end end
+            for _, p in ipairs(info.list or {}) do if not p.b then waiting[#waiting + 1] = p end end
             if #waiting > 0 then
                 local opts = {}
                 for _, p in ipairs(waiting) do opts[#opts + 1] = { value = tostring(p.id), label = 'Finish "' .. p.label .. '": the other side is here' } end
                 opts[#opts + 1] = { value = 'new', label = 'Start a new portal here' }
                 local got = lib.inputDialog('Portal', { { type = 'select', label = 'What is this spot', options = opts, required = true, default = opts[1].value } })
-                if not got or not got[1] then return end
+                if not got or not got[1] then return note('inform', 'Nothing changed') end
                 if got[1] ~= 'new' then
-                    local id = tonumber(got[1])
-                    if set(id, 'b', here()) then note('success', 'It is live. Walk up to it and press E.') end
+                    if set(tonumber(got[1]), 'b', spot) then note('success', 'It is live. Walk up to it and press E.') end
                     return
                 end
             end
         end
-        local spot = here()   -- the spot is where you stood when you typed it, not where you wander while naming it
-        local got = lib.inputDialog('New portal', { { type = 'input', label = 'Name', description = 'Players see "Enter <name>" and "Leave <name>"', required = true, max = 40 } })
-        if not got or not got[1] then return end
-        local ok, res = lib.callback.await('dps-studio:portalCreate', false, got[1], spot)
+        local name = typed
+        if name == '' then
+            local got = lib.inputDialog('New portal', { { type = 'input', label = 'Name', description = 'Players see "Enter <name>" and "Leave <name>"', required = true, max = 40 } })
+            name = got and got[1] or ''
+            if name == '' then return note('inform', 'No name given, so nothing was saved. You can also type /portal followed by the name.') end
+        end
+        trace('/portal asking the server to save "' .. name .. '"')
+        local ok, res = lib.callback.await('dps-studio:portalCreate', false, name, spot)
+        trace('/portal server answered: ' .. tostring(ok) .. ' ' .. tostring(res))
         if not ok then return note('error', res or 'Not saved') end
-        note('success', 'One side saved. Go to the other place by any means, then type /portal, or open /studio and press the door button.')
+        note('success', ('"%s": one side saved here. Go to the other place by any means, then type /portal, or open /studio and press the door button.'):format(name))
+      end, debug.traceback)
+      if not okRun then
+          trace('/portal ERROR: ' .. tostring(errRun))
+          note('error', 'The portal command hit an error. It has been sent to the server log.')
+      end
     end)
 end, false)
+TriggerEvent('chat:addSuggestion', '/portal', 'Studio: one side of a portal here (staff)', { { name = 'name', help = 'Optional: the name, to skip the box' } })
+TriggerEvent('chat:addSuggestion', '/portals', 'Studio: the portals list (staff)')

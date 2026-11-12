@@ -1272,6 +1272,7 @@ lib.callback.register('dps-studio:portals', function() return portalPublic() end
 ---Staff: every portal, finished or not, for the /portals list.
 lib.callback.register('dps-studio:portalList', function(src)
     if not allowed(src) then return nil end
+    lib.print.info(('%s opened the portal list'):format(who(src)))
     local out, cids, seen = {}, {}, {}
     for _, p in pairs(portals) do
         out[#out + 1] = Studio.Copy(p)
@@ -1365,3 +1366,10 @@ lib.callback.register('dps-studio:code', function(src, kind, key, code)
     return false, 'Wrong code'
 end)
 AddEventHandler('playerDropped', function() codeTries[source] = nil end)
+
+-- A staff tool on a player's game reports where it got to (and any error) so it shows in the server log.
+RegisterNetEvent('dps-studio:trace', function(words)
+    local src = source
+    if not allowed(src) or type(words) ~= 'string' then return end
+    lib.print.info(('trace %s: %s'):format(who(src), words:sub(1, 300)))
+end)
