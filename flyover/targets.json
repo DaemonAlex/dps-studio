@@ -315,24 +315,6 @@
   "spread": false
  },
  {
-  "name": "hn_hallwayroom",
-  "x": -1003.4,
-  "y": -484.4,
-  "z": 50.6,
-  "h": 70.0,
-  "n": 2,
-  "spread": false
- },
- {
-  "name": "hn_tailorroom_meta",
-  "x": -1003.4,
-  "y": -484.4,
-  "z": 45.8,
-  "h": 70.0,
-  "n": 4,
-  "spread": false
- },
- {
   "name": "houseplacement",
   "x": 1583.4,
   "y": 3740.3,
@@ -738,15 +720,6 @@
   "spread": false
  },
  {
-  "name": "prompt_seth_int_garage_01",
-  "x": -777.9,
-  "y": -371.2,
-  "z": 49.8,
-  "h": 70.0,
-  "n": 2,
-  "spread": false
- },
- {
   "name": "prompt_trainstation_ls",
   "x": 865.6,
   "y": -543.9,
@@ -1042,5 +1015,33 @@
   "h": 600.0,
   "n": 4898,
   "spread": true
+ }
+,
+ {
+  "name": "cfx_onx_vegetation",
+  "x": 357.2,
+  "y": 2640.9,
+  "z": 80.7,
+  "h": 600.0,
+  "n": 26109,
+  "spread": true
+ },
+ {
+  "name": "patoche_paleto_airport_02",
+  "x": -1809.6,
+  "y": 4924.8,
+  "z": 10.3,
+  "h": 600.0,
+  "n": 1936,
+  "spread": false
+ },
+ {
+  "name": "prompt_seth_int_garage_01",
+  "x": -777.9,
+  "y": -371.2,
+  "z": 49.8,
+  "h": 70.0,
+  "n": 2,
+  "spread": false
  }
 ]

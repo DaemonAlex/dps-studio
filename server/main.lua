@@ -108,6 +108,10 @@ local TABLES = {
         PRIMARY KEY (id))]],
     [[CREATE TABLE IF NOT EXISTS dps_studio_meta (
         k VARCHAR(40) NOT NULL, v VARCHAR(200) DEFAULT NULL, PRIMARY KEY (k))]],
+    -- DPS 2026-11-12: portals (two places joined). One row each, the whole portal as JSON like a room.
+    [[CREATE TABLE IF NOT EXISTS dps_studio_portals (
+        id INT NOT NULL AUTO_INCREMENT, data LONGTEXT NOT NULL,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, PRIMARY KEY (id))]],
 }
 
 local function persist(room)
@@ -317,6 +321,7 @@ lib.callback.register('dps-studio:roomCreate', function(src, d)
             end
             room.access = Studio.CleanAccess(d.access or (old and old.access))
             room.doors = old and old.doors or nil
+            room.manage = old and old.manage or nil   -- DPS 2026-11-12: a rebuilt room keeps its owner and managers
             rooms[name] = room
             return true
         end)
@@ -334,6 +339,10 @@ lib.callback.register('dps-studio:roomCreate', function(src, d)
         end
         room.access = Studio.CleanAccess(d.access or (old and old.access))
         room.doors = old and old.doors or nil
+        room.manage = old and old.manage or nil       -- DPS 2026-11-12: a rebuilt room keeps its owner and managers
+        room.depth = old and old.depth or nil         -- and its own depth, if staff gave it one
+        room.at = old and old.at or nil               -- and the spot staff placed its shell at
+        if old and old.shell == d.shell then room.exits = old.exits end   -- same shell: its extra doors still fit
         rooms[name] = room
         return true
     end)
@@ -383,6 +392,9 @@ lib.callback.register('dps-studio:roomCopy', function(src, name, newName, label,
         local room = Studio.Copy(from)
         room.name, room.label = newName, label
         room.entrance = { x = spot.x, y = spot.y, z = spot.z, h = spot.h }
+        -- DPS 2026-11-12: a copy is a new place. It does not inherit the owner, the managers or the
+        -- extra doors (their outside spots belong to the first room).
+        room.manage, room.exits, room.depth, room.at = nil, nil, nil, nil
         rooms[newName] = room
         return true
     end)
@@ -909,3 +921,408 @@ RegisterNetEvent('dps-studio:carried', function(name, on, ids)
     end
 end)
 
+
+-- ---------------------------------------------------------------- room managers
+-- DPS 2026-11-12 (Damon): "it can be managed by the owner or group leaders or whoever they choose so
+-- admins don't have to support it". Staff set a room's owner once (/roomowner). After that the owner
+-- side and the managers they name run the list from the door (G Manage, or /roommanage).
+-- The rules live in shared/logic.lua (Studio.MayManage, Studio.ManageApply) and are tested there.
+-- Every change goes through change(), so it is in History and can be put back.
+
+---This player as the manage rules see them. Read on the server, never taken from the client.
+local function person(src)
+    local out = { staff = allowed(src) and true or false }
+    pcall(function()
+        local p = exports.qbx_core:GetPlayer(src)
+        local pd = p and p.PlayerData or {}
+        local job, gang, ci = pd.job or {}, pd.gang or {}, pd.charinfo or {}
+        out.citizenid = pd.citizenid
+        out.job, out.jobBoss = job.name, job.isboss == true
+        out.grade = type(job.grade) == 'table' and job.grade.level or tonumber(job.grade)
+        out.gang, out.gangBoss = gang.name, gang.isboss == true
+        out.gangGrade = type(gang.grade) == 'table' and gang.grade.level or tonumber(gang.grade)
+        out.name = ((ci.firstname or '') .. ' ' .. (ci.lastname or '')):gsub('^%s+', ''):gsub('%s+$', '')
+    end)
+    return out
+end
+
+local groupCache, groupSetCache
+---Every job and gang with its ranks (and which ranks are boss), for the pickers and the checks.
+local function groupList()
+    if groupCache then return groupCache, groupSetCache end
+    local list, set = {}, {}
+    local function add(src, kind)
+        for name, g in pairs(src or {}) do
+            if type(name) == 'string' and name ~= 'none' and name ~= 'unemployed' and type(g) == 'table' then
+                local grades = {}
+                for lvl, gr in pairs(type(g.grades) == 'table' and g.grades or {}) do
+                    grades[#grades + 1] = { level = tonumber(lvl) or 0, name = type(gr) == 'table' and gr.name or tostring(gr), boss = type(gr) == 'table' and gr.isboss == true }
+                end
+                table.sort(grades, function(a, b) return a.level < b.level end)
+                list[#list + 1] = { name = name, label = g.label or name, kind = kind, grades = grades }
+                set[name] = true
+            end
+        end
+    end
+    pcall(function() add(exports.qbx_core:GetJobs(), 'job') end)
+    pcall(function() add(exports.qbx_core:GetGangs(), 'gang') end)
+    table.sort(list, function(a, b) return a.label:lower() < b.label:lower() end)
+    if #list > 0 then groupCache, groupSetCache = list, set end   -- keep only a real load
+    return list, set
+end
+
+local function namesFor(cids)
+    local out = {}
+    if #cids == 0 then return out end
+    local marks = string.rep('?,', #cids):sub(1, -2)
+    for _, r in ipairs(MySQL.query.await('SELECT citizenid, charinfo FROM players WHERE citizenid IN (' .. marks .. ')', cids) or {}) do
+        local ok, ci = pcall(json.decode, r.charinfo)
+        local n = ok and type(ci) == 'table' and ((ci.firstname or '') .. ' ' .. (ci.lastname or '')) or ''
+        out[r.citizenid] = n:gsub('^%s+', ''):gsub('%s+$', '')
+    end
+    return out
+end
+
+---Players standing within 15 m (the people a manager can add without typing an id).
+local function nearby(src)
+    local out = {}
+    local ped = GetPlayerPed(src)
+    if ped == 0 then return out end
+    local at = GetEntityCoords(ped)
+    for _, pid in ipairs(GetPlayers()) do
+        pid = tonumber(pid)
+        local other = pid and pid ~= src and GetPlayerPed(pid) or 0
+        if other ~= 0 and #(GetEntityCoords(other) - at) <= 15.0 then
+            local p = person(pid)
+            if p.citizenid then out[#out + 1] = { cid = p.citizenid, name = (p.name and p.name ~= '') and p.name or ('id ' .. pid) } end
+        end
+    end
+    table.sort(out, function(a, b) return a.name:lower() < b.name:lower() end)
+    return out
+end
+
+---What the door menu shows. nil when this player does not manage the room.
+lib.callback.register('dps-studio:manageInfo', function(src, name)
+    local room = type(name) == 'string' and rooms[name]
+    if not room then return nil end
+    local me = person(src)
+    if not Studio.MayManage(room.manage, me) then return nil end
+    local access, manage = Studio.CleanAccess(room.access), Studio.CleanManage(room.manage)
+    local cids, seen = {}, {}
+    local function want(c) if c and not seen[c] then seen[c] = true; cids[#cids + 1] = c end end
+    for _, c in ipairs(access.characters) do want(c) end
+    if manage then
+        for _, c in ipairs(manage.characters) do want(c) end
+        if manage.owner.kind == 'person' then want(manage.owner.id) end
+    end
+    return { name = room.name, label = room.label, access = access, manage = manage,
+             ownerSide = Studio.IsOwnerSide(room.manage, me), staff = me.staff,
+             names = namesFor(cids), groups = groupList(), nearby = nearby(src) }
+end)
+
+local lastManage = {}
+---One change from the door menu. The right is checked here against the live room.
+lib.callback.register('dps-studio:manageDo', function(src, name, op, arg)
+    local now = GetGameTimer()
+    if lastManage[src] and now - lastManage[src] < 300 then return false, 'One change at a time' end
+    lastManage[src] = now
+    local room = type(name) == 'string' and rooms[name]
+    if not room then return false, 'That room is gone' end
+    if type(op) ~= 'string' or type(arg) ~= 'table' then return false, 'Bad request' end
+    local me = person(src)
+    local _, set = groupList()
+    -- try it on a copy first: a refused change never touches the room, and the history line is known
+    local trial = Studio.Copy(room)
+    local ok, words = Studio.ManageApply(trial, me, op, arg, next(set) and set or nil)
+    if not ok then return false, words end
+    if (op == 'person_add' or op == 'manager_add') and not MySQL.scalar.await('SELECT 1 FROM players WHERE citizenid = ?', { arg.cid }) then
+        return false, 'Nobody has that citizen ID'
+    end
+    local saved, err = change(src, name, 'manage', words, function()
+        room.access, room.manage = trial.access, trial.manage
+        return true
+    end)
+    if not saved then return false, err or 'Not saved' end
+    -- doors the room owns (ox_doorlock) follow the same list, as they do when staff change it
+    for _, id in ipairs(room.doors or {}) do pcall(saveDoor, src, id, { access = room.access }, 'Access for') end
+    return true, words
+end)
+AddEventHandler('playerDropped', function() lastManage[source] = nil end)
+
+---Staff: who owns a room. owner = { kind = 'person', id = citizen id } | { kind = 'group', id = job or gang } | nil (no owner).
+---A new owner starts with no managers: the old owner's choices do not carry over.
+lib.callback.register('dps-studio:roomOwner', function(src, name, owner)
+    if not allowed(src) then return false, 'Setting the owner is for staff' end
+    local room = type(name) == 'string' and rooms[name]
+    if not room then return false, 'No room with that name' end
+    local manage, words
+    if owner ~= nil then
+        manage = Studio.CleanManage({ owner = owner })
+        if not manage then return false, 'Pick a person or a job or gang' end
+        if manage.owner.kind == 'group' then
+            local _, set = groupList()
+            if next(set) and not set[manage.owner.id] then return false, 'That job or gang does not exist' end
+            words = ('%s is now owned by %s (its boss rank manages)'):format(room.label, manage.owner.id)
+        else
+            if not MySQL.scalar.await('SELECT 1 FROM players WHERE citizenid = ?', { manage.owner.id }) then return false, 'Nobody has that citizen ID' end
+            words = ('%s is now owned by %s'):format(room.label, namesFor({ manage.owner.id })[manage.owner.id] or manage.owner.id)
+        end
+    else
+        words = ('%s has no owner now (staff only)'):format(room.label)
+    end
+    local ok, err = change(src, name, 'owner', words, function()
+        room.manage = manage
+        return true
+    end)
+    if not ok then return false, err or 'Not saved' end
+    return true, words
+end)
+
+---Staff: the people near me and the group list, for the /roomowner picker.
+lib.callback.register('dps-studio:ownerPickers', function(src)
+    if not allowed(src) then return nil end
+    local me = person(src)
+    return { me = me.citizenid and { cid = me.citizenid, name = me.name } or nil, nearby = nearby(src), groups = groupList() }
+end)
+
+---Staff: one more door pair for a shell room. inside = a world spot inside the room, outside = a world spot.
+lib.callback.register('dps-studio:roomExitAdd', function(src, name, inside, outside)
+    if not allowed(src) then return false, 'Adding a door is for staff' end
+    local room = type(name) == 'string' and rooms[name]
+    if not room then return false, 'No room with that name' end
+    if room.kind == 'ipl' then return false, 'Extra doors work on shell rooms only' end
+    if not Studio.ValidSpot(inside) or not Studio.ValidSpot(outside) then return false, 'Bad spot' end
+    local from = Studio.ToLocal(Studio.ShellAt(room), inside)   -- an offset inside the shell, wherever it sits or faces
+    if not Studio.ValidOffset(from) then return false, 'The inside spot must be inside this room' end
+    local list = Studio.CleanExits(room.exits) or {}
+    if #list >= 4 then return false, 'A room keeps up to 4 extra doors' end
+    list[#list + 1] = { from = from, to = { x = outside.x, y = outside.y, z = outside.z, h = outside.h } }
+    local clean = Studio.CleanExits(list)
+    if not clean or #clean ~= #list then return false, 'Bad spot' end
+    local ok, err = change(src, name, 'exit', ('Extra door %d added to %s'):format(#clean, room.label), function()
+        room.exits = clean
+        return true
+    end)
+    if not ok then return false, err or 'Not saved' end
+    return true, #clean
+end)
+
+lib.callback.register('dps-studio:roomExitRemove', function(src, name, index)
+    if not allowed(src) then return false, 'Removing a door is for staff' end
+    local room = type(name) == 'string' and rooms[name]
+    if not room then return false, 'No room with that name' end
+    local list = Studio.CleanExits(room.exits) or {}
+    index = tonumber(index)
+    if not index or not list[index] then return false, 'That extra door is gone' end
+    table.remove(list, index)
+    local ok, err = change(src, name, 'exit', ('Extra door %d removed from %s'):format(index, room.label), function()
+        room.exits = #list > 0 and list or nil
+        return true
+    end)
+    if not ok then return false, err or 'Not saved' end
+    return true
+end)
+
+-- ---------------------------------------------------------------- room depth
+-- DPS 2026-11-12 (Damon, Cayo Corp on a roof): "I think it's putting the shell inside the building".
+-- A shell sits Studio.DEPTH (60 m) under its door. Under a 97 m roof that is inside the tower. Staff
+-- give that room its own depth: /roomdepth <metres> at the room, or from the server console
+-- studio_roomdepth <room name> <metres>. Minus = above the door. "default" puts it back to 60.
+local function setDepth(src, name, value)
+    local room = type(name) == 'string' and rooms[name]
+    if not room then return false, 'No room with that name' end
+    if room.kind == 'ipl' then return false, 'An interior room sits where the game put it' end
+    local depth
+    if value ~= nil and value ~= 'default' then
+        depth = tonumber(value)
+        if not depth or depth ~= depth or math.abs(depth) < 20 or math.abs(depth) > 1500 then return false, 'Depth is 20 to 1500 metres. Minus puts the room above its door.' end
+    end
+    local words = depth and ('%s now sits %d m %s its door'):format(room.label, math.abs(depth), depth > 0 and 'under' or 'above')
+        or ('%s is back to the usual %d m under its door'):format(room.label, Studio.DEPTH)
+    local ok, err = change(src, name, 'depth', words, function()
+        room.depth = depth
+        return true
+    end)
+    if not ok then return false, err or 'Not saved' end
+    return true, words
+end
+
+lib.callback.register('dps-studio:roomDepth', function(src, name, value)
+    if not allowed(src) then return false, 'Moving a room is for staff' end
+    return setDepth(src, name, value)
+end)
+
+RegisterCommand('studio_roomdepth', function(src, args)
+    if src ~= 0 and not allowed(src) then return end
+    local ok, words = setDepth(src, args[1], args[2])
+    print(('[dps-studio] studio_roomdepth: %s'):format(words or (ok and 'saved' or 'not saved')))
+end, true)
+
+-- ---------------------------------------------------------------- place the shell
+-- DPS 2026-11-12 (Damon): "we need a better understanding of where the shell is and how to manoeuvre
+-- it in place during creation". Staff see the shell in the world and move or turn it (/roomshell,
+-- and straight after a new room is made). at = nil puts it back under its door.
+lib.callback.register('dps-studio:roomShellAt', function(src, name, at)
+    if not allowed(src) then return false, 'Moving a shell is for staff' end
+    local room = type(name) == 'string' and rooms[name]
+    if not room then return false, 'No room with that name' end
+    if room.kind == 'ipl' then return false, 'An interior room sits where the game put it' end
+    local clean, words
+    if at ~= nil then
+        if not Studio.ValidSpot(at) then return false, 'Bad spot' end
+        local e = room.entrance
+        if math.abs(at.x - e.x) > 1500 or math.abs(at.y - e.y) > 1500 or math.abs(at.z - e.z) > 1500 then return false, 'Keep the shell within 1500 m of its door' end
+        clean = { x = at.x + 0.0, y = at.y + 0.0, z = at.z + 0.0, h = at.h % 360.0 }
+        words = ('%s: shell placed %.0f m from its door, %.0f m %s, facing %.0f'):format(room.label,
+            math.sqrt((at.x - e.x) ^ 2 + (at.y - e.y) ^ 2), math.abs(at.z - e.z), at.z <= e.z and 'under' or 'above', clean.h)
+    else
+        words = ('%s: shell back under its door'):format(room.label)
+    end
+    local ok, err = change(src, name, 'shell', words, function()
+        room.at = clean
+        return true
+    end)
+    if not ok then return false, err or 'Not saved' end
+    return true, words
+end)
+
+-- ---------------------------------------------------------------- portals
+-- DPS 2026-11-12 (Damon): "stand anywhere, create one side of the portal, stop, go to the location or do
+-- whatever until I get to the destination, then pull up admin and edit the portal again adding the other
+-- end". A portal with one side is kept and listed for staff; players see it once it has both sides.
+-- Staff only for now (/portal, /portals, the door button on the panel). The lock uses the room rules.
+local portals = {}          -- id -> portal (Studio.CleanPortal shape)
+local portalsReady = false
+
+local function portalPublic()
+    local out = {}
+    for _, p in pairs(portals) do
+        local pub = Studio.PublicPortal(p)
+        if pub then out[#out + 1] = pub end
+    end
+    return out
+end
+
+local function portalBroadcast() TriggerClientEvent('dps-studio:portals', -1, portalPublic()) end
+
+local function portalSave(src, p, words)
+    MySQL.update.await('UPDATE dps_studio_portals SET data = ? WHERE id = ?', { json.encode(p), p.id })
+    MySQL.insert.await('INSERT INTO dps_studio_history (by_name, action, room, summary) VALUES (?, ?, ?, ?)',
+        { who(src), 'portal', ('portal:%d'):format(p.id), words:sub(1, 200) })
+    lib.print.info(('%s: %s'):format(who(src), words))
+    portalBroadcast()
+end
+
+CreateThread(function()
+    while not ready do Wait(200) end   -- the tables exist once the room start-up has run
+    for _, row in ipairs(MySQL.query.await('SELECT id, data FROM dps_studio_portals') or {}) do
+        local ok, d = pcall(json.decode, row.data)
+        local p = ok and Studio.CleanPortal(d)
+        if p then p.id = row.id; portals[row.id] = p
+        else lib.print.warn(('portal %s has unreadable data and was skipped'):format(tostring(row.id))) end
+    end
+    portalsReady = true
+    local n, live = 0, #portalPublic()
+    for _ in pairs(portals) do n = n + 1 end
+    lib.print.info(('portals: %d saved, %d live'):format(n, live))
+    portalBroadcast()
+end)
+
+lib.callback.register('dps-studio:portals', function() return portalPublic() end)
+
+---Staff: every portal, finished or not, for the /portals list.
+lib.callback.register('dps-studio:portalList', function(src)
+    if not allowed(src) then return nil end
+    local out, cids, seen = {}, {}, {}
+    for _, p in pairs(portals) do
+        out[#out + 1] = Studio.Copy(p)
+        for _, c in ipairs(p.access and p.access.characters or {}) do if not seen[c] then seen[c] = true; cids[#cids + 1] = c end end
+    end
+    table.sort(out, function(a, b) return a.label:lower() < b.label:lower() end)
+    return { list = out, names = namesFor(cids), groups = groupList(), nearby = nearby(src) }
+end)
+
+---Staff: a new portal with one side, where they stand.
+lib.callback.register('dps-studio:portalCreate', function(src, label, spot)
+    if not allowed(src) then return false, 'Portals are made by staff' end
+    if not portalsReady then return false, 'Studio is still starting, try again in a moment' end
+    local p = Studio.CleanPortal({ label = label, a = spot })
+    if not p then return false, 'Give it a name of 1 to 40 letters' end
+    local n = 0
+    for _ in pairs(portals) do n = n + 1 end
+    if n >= 300 then return false, 'There are 300 portals already' end
+    local id = MySQL.insert.await('INSERT INTO dps_studio_portals (data) VALUES (?)', { json.encode(p) })
+    if not id then return false, 'Not saved' end
+    p.id = id
+    portals[id] = p
+    portalSave(src, p, ('Portal %s started (one side)'):format(p.label))
+    return true, id
+end)
+
+---Staff: one change to a portal. what = a | b | label | wordsA | wordsB | car | delete, or a lock change
+---(open, group_set, group_remove, person_add, person_remove, passcode: the same rules as a room).
+lib.callback.register('dps-studio:portalSet', function(src, id, what, value)
+    if not allowed(src) then return false, 'Portals are changed by staff' end
+    local p = portals[tonumber(id) or -1]
+    if not p then return false, 'That portal is gone' end
+    local words
+    if what == 'delete' then
+        portals[p.id] = nil
+        MySQL.query.await('DELETE FROM dps_studio_portals WHERE id = ?', { p.id })
+        MySQL.insert.await('INSERT INTO dps_studio_history (by_name, action, room, summary, before_data) VALUES (?, ?, ?, ?, ?)',
+            { who(src), 'portal', ('portal:%d'):format(p.id), ('Portal %s removed'):format(p.label), json.encode(p) })
+        lib.print.info(('%s: Portal %s removed'):format(who(src), p.label))
+        portalBroadcast()
+        return true, 'Removed'
+    elseif what == 'a' or what == 'b' then
+        if not Studio.ValidSpot(value) then return false, 'Bad spot' end
+        local had = p[what] ~= nil
+        p[what] = { x = value.x + 0.0, y = value.y + 0.0, z = value.z + 0.0, h = value.h % 360.0 }
+        words = ('Portal %s: %s side %s'):format(p.label, what == 'a' and 'first' or 'second', had and 'moved' or 'added')
+    elseif what == 'label' then
+        local l = Studio.CleanLabel(value)
+        if not l then return false, 'A name is 1 to 40 letters' end
+        words = ('Portal %s renamed to %s'):format(p.label, l)
+        p.label = l
+    elseif what == 'wordsA' or what == 'wordsB' then
+        if value == nil or value == '' then p[what] = nil
+        else
+            local l = Studio.CleanLabel(value)
+            if not l then return false, 'The words are 1 to 40 letters' end
+            p[what] = l
+        end
+        words = ('Portal %s: new words at the %s side'):format(p.label, what == 'wordsA' and 'first' or 'second')
+    elseif what == 'car' then
+        p.car = value == true
+        words = ('Portal %s: cars %s'):format(p.label, p.car and 'allowed' or 'not allowed')
+    else
+        local _, set = groupList()
+        local trial = Studio.Copy(p)
+        local ok, err = Studio.ManageApply(trial, { staff = true }, what, type(value) == 'table' and value or {}, next(set) and set or nil)
+        if not ok then return false, err end
+        if what == 'person_add' and not MySQL.scalar.await('SELECT 1 FROM players WHERE citizenid = ?', { value.cid }) then return false, 'Nobody has that citizen ID' end
+        p.access = trial.access
+        words = err:gsub('^' .. p.label:gsub('%p', '%%%0') .. ':', 'Portal ' .. p.label .. ':')
+    end
+    portalSave(src, p, words)
+    return true, words
+end)
+
+-- ---------------------------------------------------------------- passcodes
+-- A room or portal with a passcode: the player types it at the door and the server says yes or no.
+-- The code itself is never sent to anyone's game. Five tries a minute.
+local codeTries = {}
+lib.callback.register('dps-studio:code', function(src, kind, key, code)
+    local now = os.time()
+    local t = codeTries[src]
+    if not t or now - t.at > 60 then t = { at = now, n = 0 }; codeTries[src] = t end
+    t.n = t.n + 1
+    if t.n > 5 then return false, 'Too many tries. Wait a minute.' end
+    local access
+    if kind == 'room' then access = type(key) == 'string' and rooms[key] and rooms[key].access
+    elseif kind == 'portal' then access = portals[tonumber(key) or -1] and portals[tonumber(key)].access end
+    if not access then return false, 'Nothing to open here' end
+    if Studio.CodeOpens(access, code) then t.n = 0 return true end
+    return false, 'Wrong code'
+end)
+AddEventHandler('playerDropped', function() codeTries[source] = nil end)

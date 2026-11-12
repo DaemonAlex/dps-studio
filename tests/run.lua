@@ -192,5 +192,156 @@ check('crowds: dances and patron models listed', #StudioCrowd.DANCES >= 50 and #
 check('crowds: levels off < light < packed', StudioCrowd.LEVELS.off == 0 and StudioCrowd.LEVELS.light < StudioCrowd.LEVELS.packed)
 check('crowds: venue names cleaned', StudioCrowd.CleanKey('Split Sides') == 'split_sides' and StudioCrowd.CleanKey('x') == nil and StudioCrowd.CleanKey(5) == nil)
 print(('interiors offered: %d walk-in, %d drive-in game ones + bob74'):format(walk, drive))
+-- room managers (DPS 2026-11-12): owner = person or group, ranks respected, staff not needed
+do
+    local boss   = { citizenid = 'BOSS1', job = 'police', grade = 4, jobBoss = true }
+    local sgt    = { citizenid = 'SGT1',  job = 'police', grade = 2, jobBoss = false }
+    local cadet  = { citizenid = 'CAD1',  job = 'police', grade = 0, jobBoss = false }
+    local medic  = { citizenid = 'MED1',  job = 'ambulance', grade = 3, jobBoss = false, gang = 'ballas', gangGrade = 2, gangBoss = false }
+    local gboss  = { citizenid = 'GB1',   job = 'unemployed', grade = 0, gang = 'ballas', gangGrade = 3, gangBoss = true }
+    local staff  = { citizenid = 'ADM1',  staff = true }
+    local nobody = { citizenid = 'NOB1',  job = 'unemployed', grade = 0 }
+    local groups = { police = true, ambulance = true, ballas = true }
+    local function room(manage, access) return { name = 'office', label = 'Office', manage = manage, access = access or { open = false } } end
+
+    check('manage: no owner means nil', Studio.CleanManage({ characters = { 'A' } }) == nil and Studio.CleanManage(nil) == nil)
+    check('manage: bad owner kind refused', Studio.CleanManage({ owner = { kind = 'robot', id = 'x' } }) == nil)
+    check('manage: bad owner id refused', Studio.CleanManage({ owner = { kind = 'person', id = 'a b;c' } }) == nil)
+    local cm = Studio.CleanManage({ owner = { kind = 'group', id = 'police' }, grade = 99, characters = { 'OK1', 'bad id!' }, groups = { ballas = -5 } })
+    check('manage: grade clamped, bad ids dropped', cm.grade == 50 and #cm.characters == 1 and cm.groups.ballas == 0)
+    check('manage: a person owner keeps no grade', Studio.CleanManage({ owner = { kind = 'person', id = 'P1' }, grade = 3 }).grade == nil)
+
+    local personRoom = room({ owner = { kind = 'person', id = 'BOSS1' } })
+    check('owner person: the owner manages', Studio.MayManage(personRoom.manage, boss))
+    check('owner person: a colleague does not', not Studio.MayManage(personRoom.manage, sgt))
+    check('owner person: staff always manage', Studio.MayManage(personRoom.manage, staff))
+    check('no owner: only staff manage', not Studio.MayManage(nil, boss) and Studio.MayManage(nil, staff))
+
+    local groupRoom = room({ owner = { kind = 'group', id = 'police' } })
+    check('owner group: the boss rank leads', Studio.IsOwnerSide(groupRoom.manage, boss))
+    check('owner group: a lower rank does not lead', not Studio.IsOwnerSide(groupRoom.manage, sgt) and not Studio.MayManage(groupRoom.manage, sgt))
+    check('owner group: another group boss does not lead', not Studio.IsOwnerSide(groupRoom.manage, gboss))
+    check('owner group: a gang can own a room', Studio.IsOwnerSide({ owner = { kind = 'group', id = 'ballas' } }, gboss) and not Studio.IsOwnerSide({ owner = { kind = 'group', id = 'ballas' } }, medic))
+    -- follows the rank, not the name: the old boss demoted, a new boss promoted
+    local oldBoss = { citizenid = 'BOSS1', job = 'police', grade = 2, jobBoss = false }
+    local newBoss = { citizenid = 'SGT1', job = 'police', grade = 4, jobBoss = true }
+    check('owner group: follows the rank, not the person', not Studio.IsOwnerSide(groupRoom.manage, oldBoss) and Studio.IsOwnerSide(groupRoom.manage, newBoss))
+
+    -- the leader lowers the bar
+    local ok, words = Studio.ManageApply(groupRoom, boss, 'leader_grade', { grade = 2 }, groups)
+    check('leader: lowers the bar to rank 2', ok and groupRoom.manage.grade == 2 and Studio.IsOwnerSide(groupRoom.manage, sgt) and not Studio.IsOwnerSide(groupRoom.manage, cadet))
+    check('leader: the boss still leads below any bar', Studio.IsOwnerSide({ owner = { kind = 'group', id = 'police' }, grade = 50 }, boss))
+    ok = Studio.ManageApply(groupRoom, boss, 'leader_grade', {}, groups)
+    check('leader: bar cleared, boss only again', ok and groupRoom.manage.grade == nil and not Studio.IsOwnerSide(groupRoom.manage, sgt))
+    check('leader: a person owner has no ranks', not Studio.ManageApply(personRoom, boss, 'leader_grade', { grade = 1 }, groups))
+
+    -- the leader grants a person and another group
+    ok = Studio.ManageApply(groupRoom, boss, 'manager_add', { cid = 'NOB1' }, groups)
+    check('leader: names a person as manager', ok and Studio.MayManage(groupRoom.manage, nobody) and not Studio.IsOwnerSide(groupRoom.manage, nobody))
+    check('leader: same person twice refused', not Studio.ManageApply(groupRoom, boss, 'manager_add', { cid = 'NOB1' }, groups))
+    ok = Studio.ManageApply(groupRoom, boss, 'mgroup_set', { group = 'ballas', grade = 3 }, groups)
+    check('leader: another group manages from its rank up', ok and Studio.MayManage(groupRoom.manage, gboss) and not Studio.MayManage(groupRoom.manage, medic))
+    check('leader: unknown group refused', not Studio.ManageApply(groupRoom, boss, 'mgroup_set', { group = 'ghosts', grade = 0 }, groups))
+    check('manager: cannot change who manages', not Studio.ManageApply(groupRoom, nobody, 'manager_add', { cid = 'MED1' }, groups))
+    check('manager: cannot move the leader bar', not Studio.ManageApply(groupRoom, nobody, 'leader_grade', { grade = 0 }, groups))
+    check('outsider: cannot change access', not Studio.ManageApply(groupRoom, cadet, 'person_add', { cid = 'CAD1' }, groups))
+
+    -- managers change who gets in
+    ok = Studio.ManageApply(groupRoom, nobody, 'group_set', { group = 'police', grade = 2 }, groups)
+    check('access: group added with a lowest rank', ok and Studio.AccessAllows(groupRoom.access, sgt) and not Studio.AccessAllows(groupRoom.access, cadet))
+    ok = Studio.ManageApply(groupRoom, nobody, 'group_set', { group = 'police', grade = 0 }, groups)
+    check('access: rank changed in place', ok and Studio.AccessAllows(groupRoom.access, cadet))
+    ok = Studio.ManageApply(groupRoom, nobody, 'person_add', { cid = 'MED1' }, groups)
+    check('access: person added', ok and Studio.AccessAllows(groupRoom.access, medic))
+    ok = Studio.ManageApply(groupRoom, nobody, 'person_remove', { cid = 'MED1' }, groups)
+    check('access: person removed', ok and not Studio.AccessAllows(groupRoom.access, medic))
+    check('access: removing someone not listed refused', not Studio.ManageApply(groupRoom, nobody, 'person_remove', { cid = 'MED1' }, groups))
+    ok = Studio.ManageApply(groupRoom, nobody, 'group_remove', { group = 'police' }, groups)
+    check('access: group removed', ok and not Studio.AccessAllows(groupRoom.access, sgt))
+    check('access: passcode set', Studio.ManageApply(groupRoom, nobody, 'passcode', { code = 'abc123' }, groups) and groupRoom.access.passcode == 'abc123')
+    check('access: bad passcode refused', not Studio.ManageApply(groupRoom, nobody, 'passcode', { code = 'has space' }, groups) and groupRoom.access.passcode == 'abc123')
+    check('access: passcode cleared', Studio.ManageApply(groupRoom, nobody, 'passcode', {}, groups) and groupRoom.access.passcode == nil)
+    check('access: open to everyone and back', Studio.ManageApply(groupRoom, nobody, 'open', { on = true }, groups) and groupRoom.access.open == true
+        and Studio.ManageApply(groupRoom, nobody, 'open', { on = false }, groups) and groupRoom.access.open == false)
+    check('access: unknown change refused', not Studio.ManageApply(groupRoom, boss, 'delete_room', {}, groups))
+    check('access: no owner, a player changes nothing', not Studio.ManageApply(room(nil), boss, 'person_add', { cid = 'X1' }, groups))
+    check('access: no owner, staff still can', Studio.ManageApply(room(nil), staff, 'person_add', { cid = 'X1' }, groups))
+    check('owner ops: no owner, even staff are told to set one', not Studio.ManageApply(room(nil), staff, 'manager_add', { cid = 'X1' }, groups))
+
+    -- nobody is locked out of their own room
+    local locked = room({ owner = { kind = 'group', id = 'police' } }, { open = false })
+    check('entry: the leader gets in with an empty list', Studio.MayEnterRoom(locked, boss) and not Studio.MayEnterRoom(locked, sgt))
+    check('entry: a named manager gets in', Studio.MayEnterRoom(room({ owner = { kind = 'person', id = 'P9' }, characters = { 'NOB1' } }), nobody))
+    check('entry: an open room lets everyone in', Studio.MayEnterRoom(room(nil, { open = true }), nobody))
+    -- a named manager who leaves the group keeps the right; a rank holder who loses the rank does not
+    local left = { citizenid = 'NOB1', job = 'unemployed', grade = 0 }
+    check('named manager keeps the right after leaving a group', Studio.MayManage(groupRoom.manage, left))
+    local demoted = { citizenid = 'GB1', gang = 'ballas', gangGrade = 1, gangBoss = false }
+    check('rank manager loses the right with the rank', not Studio.MayManage(groupRoom.manage, demoted))
+
+    -- the manage block reaches players and the panel, and survives a copy
+    local pub = Studio.PublicRoom({ name = 'o', label = 'O', shell = 's', entrance = {}, exit = {}, look = 1, looks = { { id = 1, name = 'Default', pieces = {} } }, manage = groupRoom.manage })
+    check('public room carries the manage block', pub.manage and pub.manage.owner.id == 'police')
+
+    -- extra doors
+    local ex = Studio.CleanExits({ { from = { x = 1, y = 2, z = 0, h = 90 }, to = { x = 100, y = 200, z = 30, h = 0 } }, { from = { x = 999, y = 0, z = 0, h = 0 }, to = { x = 1, y = 1, z = 1, h = 0 } }, 'junk' })
+    check('exits: good pair kept, bad ones dropped', ex and #ex == 1 and ex[1].to.x == 100)
+    check('exits: none gives nil', Studio.CleanExits({}) == nil and Studio.CleanExits(nil) == nil)
+    local many = {}
+    for i = 1, 9 do many[i] = { from = { x = 0, y = 0, z = 0, h = 0 }, to = { x = i, y = 0, z = 0, h = 0 } } end
+    check('exits: at most 4', #Studio.CleanExits(many) == 4)
+end
+
+
+-- room depth (DPS 2026-11-12): a roof room needs its own depth
+check('depth: default when not set', Studio.RoomDepth({}) == Studio.DEPTH and Studio.RoomDepth(nil) == Studio.DEPTH)
+check('depth: own value used, under or above', Studio.RoomDepth({ depth = 140 }) == 140 and Studio.RoomDepth({ depth = -400 }) == -400)
+check('depth: too small, too big or junk falls back', Studio.RoomDepth({ depth = 5 }) == Studio.DEPTH and Studio.RoomDepth({ depth = 9999 }) == Studio.DEPTH and Studio.RoomDepth({ depth = 'x' }) == Studio.DEPTH)
+
+-- place the shell (DPS 2026-11-12): a hand-placed, turned shell carries everything inside it
+do
+    local function near(a, b) return math.abs(a - b) < 1e-6 end
+    local door = { x = 100, y = 200, z = 97, h = 0 }
+    local under = Studio.ShellAt({ entrance = door })
+    check('shell: default is straight under the door, unturned', under.x == 100 and under.y == 200 and under.z == 97 - Studio.DEPTH and under.h == 0)
+    check('shell: own depth respected', Studio.ShellAt({ entrance = door, depth = -400 }).z == 497)
+    local placed = Studio.ShellAt({ entrance = door, at = { x = 110, y = 190, z = 50, h = 450 } })
+    check('shell: hand-placed spot wins, heading wrapped', placed.x == 110 and placed.z == 50 and placed.h == 90)
+    check('shell: a spot too far from the door is ignored', Studio.ShellAt({ entrance = door, at = { x = 9000, y = 200, z = 50, h = 0 } }).z == 97 - Studio.DEPTH)
+    check('shell: junk spot is ignored', Studio.ShellAt({ entrance = door, at = { x = 'a' } }).z == 97 - Studio.DEPTH)
+    local off = { x = 3, y = 4, z = 1, h = 10 }
+    local w0 = Studio.ToWorld(under, off)
+    check('offset: unturned shell is the plain sum, as before', w0.x == 103 and w0.y == 204 and w0.z == 97 - Studio.DEPTH + 1 and w0.h == 10)
+    local at90 = { x = 0, y = 0, z = 0, h = 90 }
+    local w90 = Studio.ToWorld(at90, { x = 0, y = 1, z = 0, h = 0 })
+    check('offset: heading 90 turns forward to face west', near(w90.x, -1) and near(w90.y, 0) and w90.h == 90)
+    local wr = Studio.ToWorld(at90, { x = 1, y = 0, z = 2, h = 350 })
+    check('offset: right turns to north, heading wraps', near(wr.x, 0) and near(wr.y, 1) and wr.z == 2 and wr.h == 80)
+    local any = { x = 12.5, y = -40.25, z = 7, h = 123 }
+    local back = Studio.ToLocal(any, Studio.ToWorld(any, off))
+    check('offset: there and back gives the same spot', near(back.x, 3) and near(back.y, 4) and near(back.z, 1) and near(back.h, 10))
+    local pub = Studio.PublicRoom({ name = 'o', label = 'O', shell = 's', entrance = door, exit = off, look = 1, looks = { { id = 1, name = 'Default', pieces = {} } }, at = { x = 1, y = 2, z = 3, h = 4 } })
+    check('public room carries the shell spot', pub.at and pub.at.z == 3)
+end
+
+-- portals and passcodes (DPS 2026-11-12)
+do
+    local A, B = { x = 1, y = 2, z = 3, h = 370 }, { x = 100, y = 200, z = 30, h = 90 }
+    check('portal: needs a label and one good side', Studio.CleanPortal({ label = 'Lift', a = A }) ~= nil and Studio.CleanPortal({ label = '', a = A }) == nil and Studio.CleanPortal({ label = 'Lift', a = { x = 'no' } }) == nil)
+    check('portal: one side is saved but not shown to players', Studio.CleanPortal({ label = 'Lift', a = A }).b == nil and Studio.PublicPortal({ label = 'Lift', a = A }) == nil)
+    local pub = Studio.PublicPortal({ id = 7, label = 'Lift', a = A, b = B })
+    check('portal: both sides make it live, heading wrapped', pub and pub.id == 7 and pub.a.h == 10 and pub.b.x == 100)
+    check('portal: default words from the label', pub.wordsA == 'Enter Lift' and pub.wordsB == 'Leave Lift')
+    check('portal: own words kept', Studio.PublicPortal({ label = 'Lift', a = A, b = B, wordsA = 'Go up', wordsB = 'Go down' }).wordsA == 'Go up')
+    check('portal: open to everyone unless locked', pub.access.open == true)
+    local locked = Studio.PublicPortal({ label = 'Lift', a = A, b = B, access = { open = false, groups = { police = 2 }, passcode = 'abc' } })
+    check('portal: lock carried, passcode hidden', locked.access.open == false and locked.access.groups.police == 2 and locked.access.passcode == nil and locked.access.code == true)
+    check('passcode: never sent to players for rooms either', Studio.PublicRoom({ name = 'o', label = 'O', shell = 's', entrance = {}, exit = {}, look = 1, looks = { { id = 1, name = 'D', pieces = {} } }, access = { open = false, passcode = 'xyz' } }).access.passcode == nil)
+    check('passcode: right code opens, wrong or missing does not', Studio.CodeOpens({ passcode = 'abc' }, 'abc') and not Studio.CodeOpens({ passcode = 'abc' }, 'abd') and not Studio.CodeOpens({ passcode = 'abc' }, nil) and not Studio.CodeOpens({}, ''))
+    local port = { label = 'Lift', a = A, b = B, access = { open = false } }
+    check('portal: staff set its lock with the same rules as a room', Studio.ManageApply(port, { staff = true }, 'group_set', { group = 'police', grade = 1 }, { police = true }) and port.access.groups.police == 1)
+    check('portal: a locked portal lets the listed rank through', Studio.MayEnterRoom(port, { job = 'police', grade = 1 }) and not Studio.MayEnterRoom(port, { job = 'police', grade = 0 }))
+end
+
 print(('%d checks, %s'):format(n, fails == 0 and 'ALL PASS' or (fails .. ' FAILED')))
 os.exit(fails == 0 and 0 or 1)

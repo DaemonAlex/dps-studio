@@ -4,8 +4,8 @@ lua54 'yes'
 
 name 'dps-studio'
 author 'Del Perro Sands'
-description 'DPS Studio (/admin): build the rooms players use every day. Rooms, saved looks, furniture, shells, inspect, spots, doors and history on one panel.'
-version '1.4.0'
+description 'DPS Studio (/studio): build the rooms players use every day. Rooms, saved looks, furniture, shells, inspect, spots, doors and history on one panel.'
+version '1.6.0'
 
 shared_scripts {
     '@ox_lib/init.lua',
@@ -24,6 +24,8 @@ client_scripts {
     'client/flyover.lua',
     'client/ipl.lua',
     'client/doors.lua',
+    'client/manage.lua',   -- room owners and managers, /roomowner, /roomexit (needs doors.lua)
+    'client/portals.lua',  -- portals: two places joined, made one side at a time (/portal, /portals)
     'client/panel.lua',
     'client/crowds.lua',
 }

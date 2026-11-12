@@ -1,6 +1,6 @@
 # dps-studio
 
-Admin toolkit for Qbox servers: build walk-in rooms, place furniture, edit doors, mark spots and inspect objects from one panel opened with `/admin`.
+Admin toolkit for Qbox servers: build walk-in rooms, place furniture, edit doors, mark spots and inspect objects from one panel opened with `/studio`.
 
 ## Features
 
@@ -11,6 +11,11 @@ Everything below is admin only (ACE `dps.entityselector`) unless it says "all pl
 - Each room has a door in the world and a way out inside. Players press **E** at either one. The screen fades and moves them.
 - Rooms can be locked. Access can be: everyone, staff, jobs or gangs (with a minimum grade), key items, specific citizen ids, or a passcode. Staff always get in.
 - Rename a room, move its door, change its shell or way out, copy it, delete it, or teleport to it.
+- **Owners and managers (1.5.0).** Staff set a room's owner once with `/roomowner`: a person, or a job or gang. After that no staff are needed. The owner side (the person, or the owner group's boss rank) and the managers they name change who gets in from the door itself: press **G** at any of the room's doors, or type `/roommanage`. They can add or remove people, add or remove jobs and gangs with a lowest rank, set a passcode, and open or lock the room. The owner side can also name managers (people, or other groups from a rank up) and, for a group owner, lower the rank that counts as a leader. A group owner follows the rank, not the name. Managers always get into their own room. Every change is in History.
+- **Place the shell (1.5.0).** A shell no longer has to sit 60 m under its door. Right after a new room is made, and any time with `/roomshell` at the room, a see-through copy of the shell stands in the world with an outline, a box of lines and a line from the door. Arrows slide it, Page Up / Down lift it, Q and E turn it (Shift for big steps, Alt for small), G brings it to where you stand, H puts it back under the door, Enter saves. The readout shows how far it is from the door, how far under or above, the floor height, the size and the facing. Furniture, the way out and extra doors move and turn with it. `/roomdepth <metres>` is the quick way to only change how far under (or, with a minus, above) the door it sits.
+- **Portals (1.6.0).** A portal joins two places: walk up to either side, press E, arrive at the other. Staff make one a side at a time. `/portal` where you stand starts one and asks for a name. Go to the other place by any means, then `/portal` again, or open `/studio` and press the door button (`/portals`), and choose "Add the other side here". A portal with one side is saved and listed for staff, and shows nothing to players until it has both. From the list: move a side, go to a side, rename, change the prompt words, allow cars, lock it (jobs and gangs from a rank up, named people, a passcode) or remove it. Changes show at once, with no restart.
+- **Passcodes at the door (1.6.0).** A room or portal with a passcode shows "Enter the code" to people not on its list. The server checks the code; it is never sent to players' games. Five tries a minute.
+- **Extra doors (1.5.0).** A shell room can have up to 4 more door pairs, all on the room's own lock. Staff: type `/roomexit` inside at the new door (facing into the room), then `/roomexit` again at the outside spot (facing away). `/roomexit remove` takes one away.
 - Interior rooms serve one room per interior and cannot be copied.
 - All players: rooms load when you are within 250 m and are removed when you leave. Inside a shell room the clock and rain are paused for you only.
 
@@ -129,10 +134,17 @@ Other settings:
 
 | Command or key | Who | What it does |
 |---|---|---|
-| `/admin` | Admins (`dps.entityselector`) | Opens or closes the Studio panel. Tabs: Rooms, Place, Shells, Inspect, Spots, Doors, History. |
+| `/studio` | Admins (`dps.entityselector`) | Opens or closes the Studio panel. Tabs: Rooms, Place, Shells, Inspect, Spots, Doors, History. |
 | `/mapflyover` | Admins (`dps.entityselector`) | Starts the map flyover. Needs `screencapture`. |
 | `/spot [words]` | Admins | Saves your position with the nearest prop, street and area. Default key **Page Up**. |
 | `/pos` | Admins | Saves your position and shows a `vector4(...)` card for 12 seconds. Default key **F3**. |
+| `/roommanage` | A room's owner and managers | At a room door or inside: who gets in (people, jobs and gangs from a rank up, passcode, open or locked) and, for the owner side, who else manages. Also **G** at any of the room's doors. |
+| `/roomowner` | Admins | At a room: set its owner (a person, a job or gang, or nobody). |
+| `/roomexit` | Admins | Add one more door to a shell room: run inside at the spot, then outside at the spot. `/roomexit remove`, `/roomexit cancel`. |
+| `/roomshell` | Admins | See the room's shell in the world and move or turn it. `/roomshell reset` puts it back under the door. |
+| `/roomdepth <metres>` | Admins | How far under its door the shell sits (minus = above). `/roomdepth default`. |
+| `/portal` | Admins | One side of a new portal where you stand; again elsewhere to finish one that is waiting. |
+| `/portals` | Admins | The portals list: add the other side, move, rename, words, cars, lock, go to, remove. Also the door button on the panel. |
 | Middle mouse (hold) | Admins | Inspects the object you aim at. Rebindable in key settings (`+studio_scan`). |
 | **E** at a room door | All players | Enter or leave a room (if allowed). |
 | **Backspace** | Admins | Leaves previews, placing, door picking, the photo booth and the flyover. |

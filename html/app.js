@@ -793,6 +793,7 @@
   function leave() { closeModal(); if (S.pick) post('pickCancel'); clearTimeout(S.shellTimer); S.pv = null; S.pick = null; S.styling = null; S.open = false; post('close'); }
   $('#close').addEventListener('click', leave);
   $('#fleet').addEventListener('click', () => post('fleet'));
+  $('#portals').addEventListener('click', () => post('portals'));   // DPS 2026-11-12: opens the portals list
   let qt = null; q.addEventListener('input', () => { clearTimeout(qt); qt = setTimeout(() => { qt = null; render(false); }, 90); });
   q.addEventListener('focus', () => bar.classList.add('focus'));
   q.addEventListener('blur', () => bar.classList.remove('focus'));
@@ -908,7 +909,7 @@
     return `<h5>INSPECT</h5><div class="big">${esc(d.name)}</div><dl>
       ${d.where ? `<dt>You</dt><dd>${esc(d.where)}</dd>` : ''}
       ${d.kind ? `<dt>Kind</dt><dd>${esc(d.kind)}</dd>` : ''}${d.hash ? `<dt>Hash</dt><dd>${esc(d.hash)}</dd>` : ''}${v4 ? `<dt>Spot</dt><dd>${esc(v4)}</dd>` : ''}</dl>
-      ${d.note ? `<p>${esc(d.note)}</p>` : ''}<p>Open /admin, Inspect tab, to copy it.</p>`;
+      ${d.note ? `<p>${esc(d.note)}</p>` : ''}<p>Open /studio, Inspect tab, to copy it.</p>`;
   }
 
   /* ---------- messages from the game ---------- */
@@ -961,7 +962,7 @@
         if (m.card) showCard(inspectCard(m.card));
         else if (m.linger) { clearTimeout(cardT); cardT = setTimeout(() => showCard(null), m.linger); }
         break;
-      case 'pos': showCard(`<h5>F3 COORDS · #${esc(m.id)}</h5><div class="big">${esc(m.text)}</div>${m.where ? `<dl><dt>You</dt><dd>${esc(m.where)}</dd></dl>` : ''}<p>Saved. Open /admin, Spots tab, to copy it.</p>`, 12000); break;
+      case 'pos': showCard(`<h5>F3 COORDS · #${esc(m.id)}</h5><div class="big">${esc(m.text)}</div>${m.where ? `<dl><dt>You</dt><dd>${esc(m.where)}</dd></dl>` : ''}<p>Saved. Open /studio, Spots tab, to copy it.</p>`, 12000); break;
       case 'changed':
         if (m.here !== undefined) S.here = m.here || null;
         if (S.shown && (!m.what || m.what === S.tab)) load();

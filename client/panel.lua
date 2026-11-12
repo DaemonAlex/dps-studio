@@ -1,4 +1,4 @@
--- CLIENT (admin). /admin opens DPS Studio: one panel, tabs for Rooms, Place, Shells,
+-- CLIENT (admin). /studio opens DPS Studio: one panel, tabs for Rooms, Place, Shells,
 -- Inspect, Spots, Doors and History. The page (html/) renders; this file owns the game
 -- side: focus, the shell preview camera, walking in, marking the way out, teleports.
 -- Nothing here polls: the only per-frame loops run while previewing or walking a shell.
@@ -314,6 +314,17 @@ local function walk()
                     pick = nil
                     previewStop({ x = e.x, y = e.y, z = e.z, h = e.h })
                     notify(true, ('%s is ready. Press E at the door to try it.'):format(d.label))
+                    -- DPS 2026-11-12 (Damon): a new room goes straight to "place the shell", so you see where
+                    -- it sits against the building and can move it before anyone walks in
+                    if d.redo ~= true and StudioC.PlaceShell then
+                        local made = d.name
+                        CreateThread(function()
+                            local t = GetGameTimer() + 5000
+                            while not StudioC.rooms[made] and GetGameTimer() < t do Wait(100) end
+                            Wait(800)
+                            if StudioC.rooms[made] then StudioC.PlaceShell(made) end
+                        end)
+                    end
                 else
                     notify(false, err or 'Not saved')
                 end
@@ -346,11 +357,12 @@ walkKeys = function()
     flowKeys(pv.model or 'Shell', { { 'Walk', 'look around inside' }, { 'H', 'next spot, if you landed outside' } })
 end
 
--- ---------------------------------------------------------------- /admin
-RegisterCommand('admin', function()
+-- ---------------------------------------------------------------- /studio
+-- DPS 2026-11-12 (Damon: "instead of /admin it should be /studio, cut down on confusion"). /admin is no longer ours.
+RegisterCommand('studio', function()
     if not StudioC.isAdmin then
         local r = lib.callback.await('dps-studio:isAdmin', false)
-        print(('[dps-studio] /admin permission check answered: %s'):format(tostring(r)))
+        print(('[dps-studio] /studio permission check answered: %s'):format(tostring(r)))
         StudioC.isAdmin = r and true or false
         if not StudioC.isAdmin then
             return lib.notify({ type = 'error', description = 'Studio needs the admin permission (dps.entityselector).' })
@@ -359,9 +371,9 @@ RegisterCommand('admin', function()
     if StudioC.busy then
         return lib.notify({ type = 'inform', description = 'Finish placing or walking first (Backspace leaves).' })
     end
-    print(('[dps-studio] /admin %s'):format(open and 'closing' or 'opening'))
+    print(('[dps-studio] /studio %s'):format(open and 'closing' or 'opening'))
     if open then
-        -- DPS 2026-10-18: closing with /admin ends a preview too, so the next /admin opens fresh where you stand
+        -- DPS 2026-10-18: closing with /studio ends a preview too, so the next /studio opens fresh where you stand
         if pv.on then previewStop() end
         if StudioC.IplVisiting() then CreateThread(function() StudioC.IplLeave() end) end
         pick, tab = nil, 'rooms'
@@ -371,7 +383,7 @@ RegisterCommand('admin', function()
     end
 end, false)
 
-TriggerEvent('chat:addSuggestion', '/admin', 'DPS Studio: rooms, furniture, shells, spots and doors (admin)')
+TriggerEvent('chat:addSuggestion', '/studio', 'DPS Studio: rooms, furniture, shells, spots and doors (admin)')
 
 -- ---------------------------------------------------------------- NUI: general
 local function tpTo(x, y, z, h, roomName)
@@ -446,7 +458,7 @@ RegisterNUICallback('roomGo', function(d, cb)
     local r = StudioC.rooms[d.name]
     if not r then return cb({ ok = false, err = 'That room is gone' }) end
     leave()
-    if d.inside then tpTo(r.out.x, r.out.y, r.out.z, r.data.exit.h, d.name)
+    if d.inside then tpTo(r.out.x, r.out.y, r.out.z, r.outH or r.data.exit.h, d.name)
     else tpTo(r.door.x, r.door.y, r.door.z, (r.data.entrance.h + 180.0) % 360.0) end
     cb({ ok = true })
 end)
@@ -488,7 +500,7 @@ RegisterNUICallback('decorate', function(d, cb)
     if StudioC.RoomHere() ~= d.name then
         leave()
         CreateThread(function()
-            StudioC.Move(r.out, r.data.exit.h, d.name)
+            StudioC.Move(r.out, r.outH or r.data.exit.h, d.name)
             show('place')
         end)
     end
@@ -759,6 +771,13 @@ RegisterNUICallback('fleet', function(_, cb)
     leave()
     cb({ ok = true })
     ExecuteCommand('fleet')
+end)
+
+-- DPS 2026-11-12: the door button on the panel opens the portals list (client/portals.lua)
+RegisterNUICallback('portals', function(_, cb)
+    leave()
+    cb({ ok = true })
+    ExecuteCommand('portals')
 end)
 
 RegisterNetEvent('dps-studio:changed', function()
